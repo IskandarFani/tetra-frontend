@@ -106,3 +106,15 @@ h1 {
 .secondaryLink:hover {
   text-decoration: underline;
 }
+
+.successMessage {
+  margin-top: 20px;
+  color: #86efac;
+  font-weight: 600;
+}
+
+.errorMessage {
+  margin-top: 20px;
+  color: #fca5a5;
+  font-weight: 600;
+}
