@@ -181,8 +181,9 @@ function RegisterPage() {
         <h1>Попробовать Tetra</h1>
 
         <p className="registerDescription">
-          Сейчас это техническая форма ранней регистрации. Она уже проходит весь
-          путь: frontend → backend → service → repository → database.
+          Оставьте имя, чтобы получить ранний доступ к Tetra. Мы собираем первых
+          пользователей, которым нужен порядок в личных документах, чеках, договорах
+          и файлах.
         </p>
 
         <form className="form" onSubmit={handleSubmit}>
@@ -198,7 +199,7 @@ function RegisterPage() {
           />
 
           <button type="submit" className="primaryButton">
-            Зарегистрироваться
+            Получить ранний доступ
           </button>
         </form>
 
