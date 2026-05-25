@@ -207,7 +207,7 @@ function EarlyAccessPage() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("/api/users", {
+      const response = await fetch("/api/trial-access", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
