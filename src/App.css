@@ -123,8 +123,14 @@
   background: #f59e0b;
 }
 
+.primaryButton:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
 .ghostButton {
   border: 1px solid rgba(148, 163, 184, 0.32);
+  background: transparent;
   color: #dbeafe;
 }
 
@@ -422,6 +428,35 @@
 
 .backLink:hover {
   text-decoration: underline;
+}
+
+.authLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+  margin-top: 24px;
+}
+
+.authLinks .backLink {
+  margin-top: 0;
+}
+
+.profileBox {
+  display: grid;
+  gap: 10px;
+  margin-top: 28px;
+  padding: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, 0.52);
+}
+
+.profileBox p {
+  margin: 0;
+  color: #dbeafe;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .successMessage {

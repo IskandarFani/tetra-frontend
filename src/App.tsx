@@ -1,11 +1,63 @@
-import { useState, type FormEvent } from "react";
-import { Link, Route, Routes } from "react-router-dom";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, Route, Routes, useNavigate } from "react-router-dom";
 import "./App.css";
 
-type AddUserResponse = {
-  status: string;
-  message: string;
+type ApiMessageResponse = {
+  status?: string;
+  message?: string;
 };
+
+type AuthResponse = ApiMessageResponse & {
+  accessToken?: string;
+  access_token?: string;
+  token?: string;
+  jwt?: string;
+  refreshToken?: string;
+  refresh_token?: string;
+};
+
+type CurrentUserResponse = {
+  id?: string | number;
+  email?: string;
+  name?: string;
+};
+
+const ACCESS_TOKEN_KEY = "accessToken";
+const REFRESH_TOKEN_KEY = "refreshToken";
+
+function getAccessToken(data: AuthResponse) {
+  return data.accessToken ?? data.access_token ?? data.token ?? data.jwt;
+}
+
+function getRefreshToken(data: AuthResponse) {
+  return data.refreshToken ?? data.refresh_token;
+}
+
+function saveTokens(data: AuthResponse) {
+  const accessToken = getAccessToken(data);
+  const refreshToken = getRefreshToken(data);
+
+  if (!accessToken || !refreshToken) {
+    throw new Error("Backend did not return tokens");
+  }
+
+  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+}
+
+async function readResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+
+  if (!text) {
+    return {} as T;
+  }
+
+  return JSON.parse(text) as T;
+}
+
+function getErrorMessage(data: ApiMessageResponse, fallback: string) {
+  return data.message || fallback;
+}
 
 function WelcomePage() {
   return (
@@ -19,7 +71,8 @@ function WelcomePage() {
         <nav className="topNav">
           <a href="#mess">Проблема</a>
           <a href="#how">Как работает</a>
-          <Link to="/register">Попробовать</Link>
+          <Link to="/early-access">Попробовать</Link>
+          <Link to="/login">Войти</Link>
         </nav>
       </header>
 
@@ -36,13 +89,13 @@ function WelcomePage() {
           </p>
 
           <div className="heroActions">
-            <Link className="primaryButton" to="/register">
+            <Link className="primaryButton" to="/early-access">
               Навести порядок
             </Link>
 
-            <a className="ghostButton" href="#mess">
-              Показать бардак
-            </a>
+            <Link className="ghostButton" to="/register">
+              Создать аккаунт
+            </Link>
           </div>
         </div>
 
@@ -140,16 +193,18 @@ function WelcomePage() {
   );
 }
 
-function RegisterPage() {
-  const [name, setName] = useState("");
+function EarlyAccessPage() {
+  const [email, setEmail] = useState("");
   const [resultMessage, setResultMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     setResultMessage("");
     setErrorMessage("");
+    setIsSubmitting(true);
 
     try {
       const response = await fetch("/api/users", {
@@ -157,19 +212,22 @@ function RegisterPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ email }),
       });
 
-      const data: AddUserResponse = await response.json();
+      const data = await readResponse<ApiMessageResponse>(response);
 
       if (!response.ok) {
-        setErrorMessage(data.message);
+        setErrorMessage(getErrorMessage(data, "Не удалось отправить email"));
         return;
       }
 
-      setResultMessage(data.message);
+      setResultMessage(getErrorMessage(data, "Email добавлен в список"));
+      setEmail("");
     } catch {
       setErrorMessage("Backend is not available");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -181,25 +239,26 @@ function RegisterPage() {
         <h1>Попробовать Tetra</h1>
 
         <p className="registerDescription">
-          Оставьте имя, чтобы получить ранний доступ к Tetra. Мы собираем первых
-          пользователей, которым нужен порядок в личных документах, чеках, договорах
-          и файлах.
+          Оставьте email, чтобы получить ранний доступ к Tetra. Мы собираем
+          первых пользователей, которым нужен порядок в личных документах,
+          чеках, договорах и файлах.
         </p>
 
         <form className="form" onSubmit={handleSubmit}>
-          <label htmlFor="name">Имя</label>
+          <label htmlFor="early-access-email">Email</label>
 
           <input
-            id="name"
-            name="name"
-            type="text"
-            placeholder="Например, Sasha"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
+            id="early-access-email"
+            name="email"
+            type="email"
+            placeholder="sasha@example.com"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
           />
 
-          <button type="submit" className="primaryButton">
-            Получить ранний доступ
+          <button type="submit" className="primaryButton" disabled={isSubmitting}>
+            {isSubmitting ? "Отправляем..." : "Получить ранний доступ"}
           </button>
         </form>
 
@@ -209,9 +268,200 @@ function RegisterPage() {
 
         {errorMessage && <p className="errorMessage">Ошибка: {errorMessage}</p>}
 
-        <Link className="backLink" to="/">
-          Назад на главную
-        </Link>
+        <div className="authLinks">
+          <Link className="backLink" to="/register">
+            Уже готовы? Создать аккаунт
+          </Link>
+          <Link className="backLink" to="/">
+            Назад на главную
+          </Link>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function AuthPage({ mode }: { mode: "register" | "login" }) {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const isRegister = mode === "register";
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setErrorMessage("");
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(isRegister ? "/api/auth/register" : "/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await readResponse<AuthResponse>(response);
+
+      if (!response.ok) {
+        setErrorMessage(
+          getErrorMessage(
+            data,
+            isRegister ? "Не удалось зарегистрироваться" : "Не удалось войти",
+          ),
+        );
+        return;
+      }
+
+      saveTokens(data);
+      navigate("/profile");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Backend is not available",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="registerPage">
+      <section className="registerCard">
+        <p className="eyebrow">{isRegister ? "регистрация" : "вход"}</p>
+
+        <h1>{isRegister ? "Создать аккаунт" : "Войти в Tetra"}</h1>
+
+        <p className="registerDescription">
+          {isRegister
+            ? "Введите email и пароль, чтобы создать аккаунт и перейти в личный профиль Tetra."
+            : "Введите email и пароль, чтобы войти в личный профиль Tetra."}
+        </p>
+
+        <form className="form" onSubmit={handleSubmit}>
+          <label htmlFor={`${mode}-email`}>Email</label>
+          <input
+            id={`${mode}-email`}
+            name="email"
+            type="email"
+            placeholder="sasha@example.com"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoComplete="email"
+            required
+          />
+
+          <label htmlFor={`${mode}-password`}>Пароль</label>
+          <input
+            id={`${mode}-password`}
+            name="password"
+            type="password"
+            placeholder="Минимум 6 символов"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete={isRegister ? "new-password" : "current-password"}
+            minLength={6}
+            required
+          />
+
+          <button type="submit" className="primaryButton" disabled={isSubmitting}>
+            {isSubmitting
+              ? "Проверяем..."
+              : isRegister
+                ? "Зарегистрироваться"
+                : "Войти"}
+          </button>
+        </form>
+
+        {errorMessage && <p className="errorMessage">Ошибка: {errorMessage}</p>}
+
+        <div className="authLinks">
+          <Link className="backLink" to={isRegister ? "/login" : "/register"}>
+            {isRegister ? "Уже есть аккаунт? Войти" : "Нет аккаунта? Зарегистрироваться"}
+          </Link>
+          <Link className="backLink" to="/early-access">
+            Только попробовать Tetra
+          </Link>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function ProfilePage() {
+  const navigate = useNavigate();
+  const [user, setUser] = useState<CurrentUserResponse | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+
+    if (!accessToken) {
+      navigate("/login");
+      return;
+    }
+
+    async function loadProfile() {
+      try {
+        const response = await fetch("/api/auth/me", {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const data = await readResponse<CurrentUserResponse & ApiMessageResponse>(response);
+
+        if (!response.ok) {
+          setErrorMessage(getErrorMessage(data, "Не удалось загрузить профиль"));
+          return;
+        }
+
+        setUser(data);
+      } catch {
+        setErrorMessage("Backend is not available");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    void loadProfile();
+  }, [navigate]);
+
+  function handleLogout() {
+    localStorage.removeItem(ACCESS_TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    navigate("/login");
+  }
+
+  return (
+    <main className="registerPage">
+      <section className="registerCard">
+        <p className="eyebrow">профиль</p>
+        <h1>Защищённая страница</h1>
+
+        {isLoading && <p className="registerDescription">Загружаем пользователя...</p>}
+
+        {user && (
+          <div className="profileBox">
+            {user.email && <p>Email: {user.email}</p>}
+            {user.name && <p>Имя: {user.name}</p>}
+            {user.id && <p>ID: {user.id}</p>}
+          </div>
+        )}
+
+        {errorMessage && <p className="errorMessage">Ошибка: {errorMessage}</p>}
+
+        <div className="authLinks">
+          <button type="button" className="ghostButton" onClick={handleLogout}>
+            Выйти
+          </button>
+          <Link className="backLink" to="/">
+            На главную
+          </Link>
+        </div>
       </section>
     </main>
   );
@@ -221,7 +471,10 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<WelcomePage />} />
-      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/early-access" element={<EarlyAccessPage />} />
+      <Route path="/register" element={<AuthPage mode="register" />} />
+      <Route path="/login" element={<AuthPage mode="login" />} />
+      <Route path="/profile" element={<ProfilePage />} />
     </Routes>
   );
 }
