@@ -55,6 +55,23 @@
   color: #ffffff;
 }
 
+.profileNavLink {
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid rgba(251, 191, 36, 0.36);
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.12);
+  color: #fde68a !important;
+  display: inline-flex;
+  align-items: center;
+}
+
+.profileNavLink:hover {
+  border-color: rgba(251, 191, 36, 0.72);
+  background: rgba(251, 191, 36, 0.18);
+  color: #ffffff !important;
+}
+
 .hero {
   max-width: 1180px;
   min-height: 680px;
@@ -137,6 +154,23 @@
 .ghostButton:hover {
   border-color: rgba(251, 191, 36, 0.6);
   color: #ffffff;
+}
+
+.secondaryButton {
+  min-height: 44px;
+  padding: 0 20px;
+  border: 1px solid rgba(252, 165, 165, 0.34);
+  border-radius: 14px;
+  background: rgba(127, 29, 29, 0.18);
+  color: #fecaca;
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.secondaryButton:hover {
+  border-color: rgba(252, 165, 165, 0.62);
+  background: rgba(127, 29, 29, 0.28);
 }
 
 .chaosDesk {
@@ -442,18 +476,72 @@
   margin-top: 0;
 }
 
+.profileCard {
+  max-width: 620px;
+}
+
+.profileHeader {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 18px;
+  align-items: center;
+}
+
+.profileAvatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 68px;
+  height: 68px;
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(251, 191, 36, 0.95), rgba(45, 212, 191, 0.86));
+  color: #111827;
+  font-size: 30px;
+  font-weight: 950;
+}
+
+.profileSubtitle {
+  max-width: 420px;
+  margin: 12px 0 0;
+  color: #a8b3c7;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
 .profileBox {
   display: grid;
-  gap: 10px;
+  gap: 0;
   margin-top: 28px;
-  padding: 18px;
   border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 18px;
   background: rgba(2, 6, 23, 0.52);
+  overflow: hidden;
 }
 
-.profileBox p {
-  margin: 0;
+.profileRow {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 16px;
+  align-items: center;
+  min-height: 58px;
+  padding: 15px 18px;
+}
+
+.profileRow + .profileRow {
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.profileRow span {
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.profileRow strong {
   color: #dbeafe;
   font-weight: 700;
   overflow-wrap: anywhere;
@@ -510,5 +598,21 @@
 
   .tetraAnswer {
     width: 88%;
+  }
+
+  .profileHeader,
+  .profileRow {
+    grid-template-columns: 1fr;
+  }
+
+  .profileAvatar {
+    width: 58px;
+    height: 58px;
+    border-radius: 18px;
+    font-size: 26px;
+  }
+
+  .profileRow {
+    gap: 6px;
   }
 }

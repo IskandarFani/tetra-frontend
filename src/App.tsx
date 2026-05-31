@@ -20,6 +20,7 @@ type CurrentUserResponse = {
   id?: string | number;
   email?: string;
   name?: string;
+  created_at?: string;
 };
 
 const ACCESS_TOKEN_KEY = "accessToken";
@@ -45,6 +46,76 @@ function saveTokens(data: AuthResponse) {
   localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
 }
 
+function clearTokens() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+function hasSavedAccessToken() {
+  return Boolean(localStorage.getItem(ACCESS_TOKEN_KEY));
+}
+
+async function refreshTokens() {
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+
+  if (!refreshToken) {
+    throw new Error("Refresh token is missing");
+  }
+
+  const response = await fetch("/api/auth/refresh", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+
+  const data = await readResponse<AuthResponse>(response);
+
+  if (!response.ok) {
+    throw new Error(getErrorMessage(data, "Не удалось обновить сессию"));
+  }
+
+  saveTokens(data);
+
+  const accessToken = getAccessToken(data);
+
+  if (!accessToken) {
+    throw new Error("Backend did not return access token");
+  }
+
+  return accessToken;
+}
+
+async function fetchProfile(accessToken: string) {
+  const response = await fetch("/api/auth/profile", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  const data = await readResponse<CurrentUserResponse & ApiMessageResponse>(response);
+
+  return { response, data };
+}
+
+async function fetchProfileWithRefresh() {
+  const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+
+  if (!accessToken) {
+    throw new Error("Access token is missing");
+  }
+
+  const firstAttempt = await fetchProfile(accessToken);
+
+  if (firstAttempt.response.status !== 401) {
+    return firstAttempt;
+  }
+
+  const newAccessToken = await refreshTokens();
+
+  return fetchProfile(newAccessToken);
+}
+
 async function readResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
 
@@ -52,14 +123,34 @@ async function readResponse<T>(response: Response): Promise<T> {
     return {} as T;
   }
 
-  return JSON.parse(text) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return { message: text } as T;
+  }
 }
 
 function getErrorMessage(data: ApiMessageResponse, fallback: string) {
   return data.message || fallback;
 }
 
+function formatProfileDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
+}
+
 function WelcomePage() {
+  const isAuthenticated = hasSavedAccessToken();
+
   return (
     <main className="landingPage">
       <header className="topBar">
@@ -71,8 +162,16 @@ function WelcomePage() {
         <nav className="topNav">
           <a href="#mess">Проблема</a>
           <a href="#how">Как работает</a>
-          <Link to="/early-access">Попробовать</Link>
-          <Link to="/login">Войти</Link>
+          {isAuthenticated ? (
+            <Link className="profileNavLink" to="/profile">
+              Профиль
+            </Link>
+          ) : (
+            <>
+              <Link to="/register">Регистрация</Link>
+              <Link to="/login">Войти</Link>
+            </>
+          )}
         </nav>
       </header>
 
@@ -89,13 +188,19 @@ function WelcomePage() {
           </p>
 
           <div className="heroActions">
-            <Link className="primaryButton" to="/early-access">
-              Навести порядок
+            <Link className="primaryButton" to={isAuthenticated ? "/profile" : "/register"}>
+              {isAuthenticated ? "Открыть профиль" : "Создать аккаунт"}
             </Link>
 
-            <Link className="ghostButton" to="/register">
-              Создать аккаунт
-            </Link>
+            {isAuthenticated ? (
+              <Link className="ghostButton" to="/profile">
+                Мой аккаунт
+              </Link>
+            ) : (
+              <Link className="ghostButton" to="/login">
+                Войти
+              </Link>
+            )}
           </div>
         </div>
 
@@ -187,94 +292,6 @@ function WelcomePage() {
             Tetra анализирует содержимое, вытаскивает смысл и превращает
             файловую помойку в понятную личную базу документов.
           </p>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function EarlyAccessPage() {
-  const [email, setEmail] = useState("");
-  const [resultMessage, setResultMessage] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    setResultMessage("");
-    setErrorMessage("");
-    setIsSubmitting(true);
-
-    try {
-      const response = await fetch("/api/trial-access", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email }),
-      });
-
-      const data = await readResponse<ApiMessageResponse>(response);
-
-      if (!response.ok) {
-        setErrorMessage(getErrorMessage(data, "Не удалось отправить email"));
-        return;
-      }
-
-      setResultMessage(getErrorMessage(data, "Email добавлен в список"));
-      setEmail("");
-    } catch {
-      setErrorMessage("Backend is not available");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  return (
-    <main className="registerPage">
-      <section className="registerCard">
-        <p className="eyebrow">ранний доступ</p>
-
-        <h1>Попробовать Tetra</h1>
-
-        <p className="registerDescription">
-          Оставьте email, чтобы получить ранний доступ к Tetra. Мы собираем
-          первых пользователей, которым нужен порядок в личных документах,
-          чеках, договорах и файлах.
-        </p>
-
-        <form className="form" onSubmit={handleSubmit}>
-          <label htmlFor="early-access-email">Email</label>
-
-          <input
-            id="early-access-email"
-            name="email"
-            type="email"
-            placeholder="sasha@example.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-
-          <button type="submit" className="primaryButton" disabled={isSubmitting}>
-            {isSubmitting ? "Отправляем..." : "Получить ранний доступ"}
-          </button>
-        </form>
-
-        {resultMessage && (
-          <p className="successMessage">Готово: {resultMessage}</p>
-        )}
-
-        {errorMessage && <p className="errorMessage">Ошибка: {errorMessage}</p>}
-
-        <div className="authLinks">
-          <Link className="backLink" to="/register">
-            Уже готовы? Создать аккаунт
-          </Link>
-          <Link className="backLink" to="/">
-            Назад на главную
-          </Link>
         </div>
       </section>
     </main>
@@ -382,9 +399,6 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
           <Link className="backLink" to={isRegister ? "/login" : "/register"}>
             {isRegister ? "Уже есть аккаунт? Войти" : "Нет аккаунта? Зарегистрироваться"}
           </Link>
-          <Link className="backLink" to="/early-access">
-            Только попробовать Tetra
-          </Link>
         </div>
       </section>
     </main>
@@ -407,12 +421,7 @@ function ProfilePage() {
 
     async function loadProfile() {
       try {
-        const response = await fetch("/api/auth/me", {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-        const data = await readResponse<CurrentUserResponse & ApiMessageResponse>(response);
+        const { response, data } = await fetchProfileWithRefresh();
 
         if (!response.ok) {
           setErrorMessage(getErrorMessage(data, "Не удалось загрузить профиль"));
@@ -420,8 +429,12 @@ function ProfilePage() {
         }
 
         setUser(data);
-      } catch {
-        setErrorMessage("Backend is not available");
+      } catch (error) {
+        clearTokens();
+        setErrorMessage(
+          error instanceof Error ? error.message : "Backend is not available",
+        );
+        navigate("/login");
       } finally {
         setIsLoading(false);
       }
@@ -431,31 +444,64 @@ function ProfilePage() {
   }, [navigate]);
 
   function handleLogout() {
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    clearTokens();
     navigate("/login");
   }
 
+  const profileInitial = user?.email?.trim().charAt(0).toUpperCase() ?? "T";
+
   return (
     <main className="registerPage">
-      <section className="registerCard">
+      <section className="registerCard profileCard">
         <p className="eyebrow">профиль</p>
-        <h1>Защищённая страница</h1>
+
+        <div className="profileHeader">
+          <div className="profileAvatar" aria-hidden="true">
+            {profileInitial}
+          </div>
+          <div>
+            <h1>Профиль пользователя</h1>
+            <p className="profileSubtitle">
+              Ваш аккаунт Tetra и данные для доступа к личному пространству.
+            </p>
+          </div>
+        </div>
 
         {isLoading && <p className="registerDescription">Загружаем пользователя...</p>}
 
         {user && (
           <div className="profileBox">
-            {user.email && <p>Email: {user.email}</p>}
-            {user.name && <p>Имя: {user.name}</p>}
-            {user.id && <p>ID: {user.id}</p>}
+            {user.email && (
+              <div className="profileRow">
+                <span>Email</span>
+                <strong>{user.email}</strong>
+              </div>
+            )}
+            {user.name && (
+              <div className="profileRow">
+                <span>Имя</span>
+                <strong>{user.name}</strong>
+              </div>
+            )}
+            {user.id && (
+              <div className="profileRow">
+                <span>ID</span>
+                <strong>{user.id}</strong>
+              </div>
+            )}
+            {user.created_at && (
+              <div className="profileRow">
+                <span>Дата регистрации</span>
+                <strong>{formatProfileDate(user.created_at)}</strong>
+              </div>
+            )}
           </div>
         )}
 
         {errorMessage && <p className="errorMessage">Ошибка: {errorMessage}</p>}
 
         <div className="authLinks">
-          <button type="button" className="ghostButton" onClick={handleLogout}>
+          <button type="button" className="secondaryButton" onClick={handleLogout}>
             Выйти
           </button>
           <Link className="backLink" to="/">
@@ -471,7 +517,6 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<WelcomePage />} />
-      <Route path="/early-access" element={<EarlyAccessPage />} />
       <Route path="/register" element={<AuthPage mode="register" />} />
       <Route path="/login" element={<AuthPage mode="login" />} />
       <Route path="/profile" element={<ProfilePage />} />
