@@ -88,7 +88,7 @@ async function refreshTokens() {
 }
 
 async function fetchProfile(accessToken: string) {
-  const response = await fetch("/api/auth/profile", {
+  const response = await fetch("/api/api/profile", {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
