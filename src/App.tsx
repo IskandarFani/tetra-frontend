@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, Route, Routes, useNavigate } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import "./App.css";
 
 type ApiMessageResponse = {
@@ -23,8 +23,23 @@ type CurrentUserResponse = {
   created_at?: string;
 };
 
+type FileRecord = {
+  id: string | number;
+  original_name?: string;
+  originalName?: string;
+  mime_type?: string;
+  mimeType?: string;
+  size?: number;
+  created_at?: string;
+  createdAt?: string;
+};
+
+type FileListResponse = FileRecord[] | ({ files?: FileRecord[] } & ApiMessageResponse) | null;
+
 const ACCESS_TOKEN_KEY = "accessToken";
 const REFRESH_TOKEN_KEY = "refreshToken";
+
+class AuthError extends Error {}
 
 function getAccessToken(data: AuthResponse) {
   return data.accessToken ?? data.access_token ?? data.token ?? data.jwt;
@@ -87,33 +102,93 @@ async function refreshTokens() {
   return accessToken;
 }
 
-async function fetchProfile(accessToken: string) {
-  const response = await fetch("/api/api/profile", {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
+async function fetchProfileWithRefresh() {
+  const response = await fetchWithAuth("/api/api/profile");
   const data = await readResponse<CurrentUserResponse & ApiMessageResponse>(response);
 
   return { response, data };
 }
 
-async function fetchProfileWithRefresh() {
+async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}) {
   const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
 
   if (!accessToken) {
-    throw new Error("Access token is missing");
+    throw new AuthError("Access token is missing");
   }
 
-  const firstAttempt = await fetchProfile(accessToken);
+  const response = await fetch(input, withAuthorization(init, accessToken));
 
-  if (firstAttempt.response.status !== 401) {
-    return firstAttempt;
+  if (response.status !== 401) {
+    return response;
   }
 
-  const newAccessToken = await refreshTokens();
+  let newAccessToken: string;
 
-  return fetchProfile(newAccessToken);
+  try {
+    newAccessToken = await refreshTokens();
+  } catch (error) {
+    throw new AuthError(error instanceof Error ? error.message : "Unable to refresh session");
+  }
+
+  return fetch(input, withAuthorization(init, newAccessToken));
+}
+
+function withAuthorization(init: RequestInit, accessToken: string): RequestInit {
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${accessToken}`);
+
+  return {
+    ...init,
+    headers,
+  };
+}
+
+async function fetchFiles() {
+  const response = await fetchWithAuth("/api/api/files");
+  const data = await readResponse<FileListResponse>(response);
+
+  return { response, data };
+}
+
+async function uploadFile(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetchWithAuth("/api/api/files", {
+    method: "POST",
+    body: formData,
+  });
+  const data = await readResponse<ApiMessageResponse>(response);
+
+  return { response, data };
+}
+
+async function deleteFile(fileID: string | number) {
+  const response = await fetchWithAuth(`/api/api/files/${fileID}`, {
+    method: "DELETE",
+  });
+  const data = await readResponse<ApiMessageResponse>(response);
+
+  return { response, data };
+}
+
+async function downloadFile(file: FileRecord) {
+  const response = await fetchWithAuth(`/api/api/files/${file.id}`);
+
+  if (!response.ok) {
+    const data = await readResponse<ApiMessageResponse>(response);
+    throw new Error(getErrorMessage(data, "Не удалось скачать файл"));
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = getFileName(file);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function readResponse<T>(response: Response): Promise<T> {
@@ -148,6 +223,51 @@ function formatProfileDate(value: string) {
   });
 }
 
+function formatFileDate(value?: string) {
+  if (!value) {
+    return "—";
+  }
+
+  return formatProfileDate(value);
+}
+
+function formatFileSize(value?: number) {
+  if (!value) {
+    return "0 Б";
+  }
+
+  const units = ["Б", "КБ", "МБ", "ГБ"];
+  let size = value;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function getFileName(file: FileRecord) {
+  return file.original_name ?? file.originalName ?? `file-${file.id}`;
+}
+
+function getFileMimeType(file: FileRecord) {
+  return file.mime_type ?? file.mimeType ?? "Файл";
+}
+
+function getFileCreatedAt(file: FileRecord) {
+  return file.created_at ?? file.createdAt;
+}
+
+function getFilesFromResponse(data: FileListResponse) {
+  if (!data) {
+    return [];
+  }
+
+  return Array.isArray(data) ? data : data.files ?? [];
+}
+
 function WelcomePage() {
   const isAuthenticated = hasSavedAccessToken();
 
@@ -163,8 +283,8 @@ function WelcomePage() {
           <a href="#mess">Проблема</a>
           <a href="#how">Как работает</a>
           {isAuthenticated ? (
-            <Link className="profileNavLink" to="/profile">
-              Профиль
+            <Link className="profileNavLink" to="/files">
+              Файлы
             </Link>
           ) : (
             <>
@@ -188,13 +308,13 @@ function WelcomePage() {
           </p>
 
           <div className="heroActions">
-            <Link className="primaryButton" to={isAuthenticated ? "/profile" : "/register"}>
-              {isAuthenticated ? "Открыть профиль" : "Создать аккаунт"}
+            <Link className="primaryButton" to={isAuthenticated ? "/files" : "/register"}>
+              {isAuthenticated ? "Открыть файлы" : "Создать аккаунт"}
             </Link>
 
             {isAuthenticated ? (
               <Link className="ghostButton" to="/profile">
-                Мой аккаунт
+                Профиль
               </Link>
             ) : (
               <Link className="ghostButton" to="/login">
@@ -307,6 +427,10 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
 
   const isRegister = mode === "register";
 
+  if (hasSavedAccessToken()) {
+    return <Navigate to="/files" replace />;
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -335,7 +459,7 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
       }
 
       saveTokens(data);
-      navigate("/profile");
+      navigate("/files");
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Backend is not available",
@@ -405,11 +529,15 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
   );
 }
 
-function ProfilePage() {
+function FilesPage() {
   const navigate = useNavigate();
   const [user, setUser] = useState<CurrentUserResponse | null>(null);
+  const [files, setFiles] = useState<FileRecord[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
@@ -421,7 +549,238 @@ function ProfilePage() {
 
     async function loadProfile() {
       try {
+        const { response: profileResponse, data: profileData } = await fetchProfileWithRefresh();
+
+        if (profileResponse.status === 401) {
+          clearTokens();
+          navigate("/login");
+          setIsLoading(false);
+          return;
+        }
+
+        if (!profileResponse.ok) {
+          setErrorMessage(getErrorMessage(profileData, "Не удалось загрузить профиль"));
+          setIsLoading(false);
+          return;
+        }
+
+        setUser(profileData);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          clearTokens();
+          navigate("/login");
+          setIsLoading(false);
+          return;
+        }
+
+        setErrorMessage(
+          error instanceof Error ? error.message : "Backend is not available",
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const { response: filesResponse, data: filesData } = await fetchFiles();
+
+        if (filesResponse.ok) {
+          setFiles(getFilesFromResponse(filesData));
+        } else {
+          setErrorMessage(getErrorMessage(!filesData || Array.isArray(filesData) ? {} : filesData, "Файловый API пока недоступен"));
+        }
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error ? error.message : "Файловый API пока недоступен",
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    void loadProfile();
+  }, [navigate]);
+
+  async function handleUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedFile) {
+      setErrorMessage("Выберите файл для загрузки");
+      return;
+    }
+
+    setErrorMessage("");
+    setSuccessMessage("");
+    setIsUploading(true);
+
+    try {
+      const { response, data } = await uploadFile(selectedFile);
+
+      if (!response.ok) {
+        setErrorMessage(getErrorMessage(data, "Не удалось загрузить файл"));
+        return;
+      }
+
+      const { response: filesResponse, data: filesData } = await fetchFiles();
+
+      if (filesResponse.ok) {
+        setFiles(getFilesFromResponse(filesData));
+      }
+
+      setSelectedFile(null);
+      setSuccessMessage("Файл загружен");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Backend is not available",
+      );
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  async function handleDownload(file: FileRecord) {
+    setErrorMessage("");
+
+    try {
+      await downloadFile(file);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Не удалось скачать файл",
+      );
+    }
+  }
+
+  async function handleDelete(file: FileRecord) {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const { response, data } = await deleteFile(file.id);
+
+      if (!response.ok) {
+        setErrorMessage(getErrorMessage(data, "Не удалось удалить файл"));
+        return;
+      }
+
+      setFiles((currentFiles) => currentFiles.filter((currentFile) => currentFile.id !== file.id));
+      setSuccessMessage("Файл удалён");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Не удалось удалить файл",
+      );
+    }
+  }
+
+  const profileInitial = user?.email?.trim().charAt(0).toUpperCase() ?? "T";
+
+  return (
+    <main className="appShell">
+      <aside className="appSidebar">
+        <Link className="brand appBrand" to="/files">
+          <span className="brandMark">T</span>
+          <span>Tetra</span>
+        </Link>
+
+        <nav className="appNav">
+          <a className="appNavLink active" href="#files">Файлы</a>
+          <a className="appNavLink disabled" href="#search">Поиск</a>
+          <a className="appNavLink disabled" href="#trash">Корзина</a>
+        </nav>
+      </aside>
+
+      <section className="appWorkspace" id="files">
+        <header className="appHeader">
+          <div>
+            <p className="eyebrow">личное хранилище</p>
+            <h1>Файлы</h1>
+          </div>
+
+          <Link className="accountPanel" to="/profile">
+            <div className="profileAvatar small" aria-hidden="true">
+              {profileInitial}
+            </div>
+            <div className="accountMeta">
+              <strong>{user?.email ?? "Аккаунт"}</strong>
+              {user?.created_at && <span>с {formatProfileDate(user.created_at)}</span>}
+            </div>
+          </Link>
+        </header>
+
+        <form className="uploadPanel" onSubmit={handleUpload}>
+          <label className="filePicker">
+            <span>{selectedFile ? selectedFile.name : "Выберите файл"}</span>
+            <input
+              type="file"
+              onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+            />
+          </label>
+          <button type="submit" className="primaryButton" disabled={isUploading}>
+            {isUploading ? "Загружаем..." : "Загрузить"}
+          </button>
+        </form>
+
+        {isLoading && <p className="registerDescription">Загружаем файловое пространство...</p>}
+        {successMessage && <p className="successMessage">{successMessage}</p>}
+        {errorMessage && <p className="errorMessage">Ошибка: {errorMessage}</p>}
+
+        <div className="filesPanel">
+          <div className="filesHeader">
+            <span>Название</span>
+            <span>Тип</span>
+            <span>Размер</span>
+            <span>Добавлен</span>
+            <span>Действия</span>
+          </div>
+
+          {!isLoading && files.length === 0 && (
+            <div className="emptyFiles">
+              <h2>Здесь пока пусто</h2>
+              <p>Когда backend для файлов будет готов, загруженные документы появятся в этом списке.</p>
+            </div>
+          )}
+
+          {files.map((file) => (
+            <div className="fileRow" key={file.id}>
+              <strong>{getFileName(file)}</strong>
+              <span>{getFileMimeType(file)}</span>
+              <span>{formatFileSize(file.size)}</span>
+              <span>{formatFileDate(getFileCreatedAt(file))}</span>
+              <div className="fileActions">
+                <button type="button" onClick={() => void handleDownload(file)}>
+                  Скачать
+                </button>
+                <button type="button" className="dangerAction" onClick={() => void handleDelete(file)}>
+                  Удалить
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function ProfilePage() {
+  const navigate = useNavigate();
+  const [user, setUser] = useState<CurrentUserResponse | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!hasSavedAccessToken()) {
+      navigate("/login");
+      return;
+    }
+
+    async function loadProfile() {
+      try {
         const { response, data } = await fetchProfileWithRefresh();
+
+        if (response.status === 401) {
+          clearTokens();
+          navigate("/login");
+          return;
+        }
 
         if (!response.ok) {
           setErrorMessage(getErrorMessage(data, "Не удалось загрузить профиль"));
@@ -430,11 +789,15 @@ function ProfilePage() {
 
         setUser(data);
       } catch (error) {
-        clearTokens();
+        if (error instanceof AuthError) {
+          clearTokens();
+          navigate("/login");
+          return;
+        }
+
         setErrorMessage(
           error instanceof Error ? error.message : "Backend is not available",
         );
-        navigate("/login");
       } finally {
         setIsLoading(false);
       }
@@ -462,7 +825,7 @@ function ProfilePage() {
           <div>
             <h1>Профиль пользователя</h1>
             <p className="profileSubtitle">
-              Ваш аккаунт Tetra и данные для доступа к личному пространству.
+              Сведения об аккаунте Tetra.
             </p>
           </div>
         </div>
@@ -501,24 +864,33 @@ function ProfilePage() {
         {errorMessage && <p className="errorMessage">Ошибка: {errorMessage}</p>}
 
         <div className="authLinks">
+          <Link className="backLink" to="/files">
+            К файлам
+          </Link>
           <button type="button" className="secondaryButton" onClick={handleLogout}>
             Выйти
           </button>
-          <Link className="backLink" to="/">
-            На главную
-          </Link>
         </div>
       </section>
     </main>
   );
 }
 
+function RootPage() {
+  if (hasSavedAccessToken()) {
+    return <Navigate to="/files" replace />;
+  }
+
+  return <WelcomePage />;
+}
+
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<WelcomePage />} />
+      <Route path="/" element={<RootPage />} />
       <Route path="/register" element={<AuthPage mode="register" />} />
       <Route path="/login" element={<AuthPage mode="login" />} />
+      <Route path="/files" element={<FilesPage />} />
       <Route path="/profile" element={<ProfilePage />} />
     </Routes>
   );

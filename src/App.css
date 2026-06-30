@@ -559,6 +559,238 @@
   font-weight: 700;
 }
 
+.appShell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  background: #0f172a;
+  color: #e5e7eb;
+}
+
+.appSidebar {
+  border-right: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(2, 6, 23, 0.62);
+  padding: 28px 22px;
+}
+
+.appBrand {
+  margin-bottom: 34px;
+}
+
+.appNav {
+  display: grid;
+  gap: 8px;
+}
+
+.appNavLink {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  border-radius: 10px;
+  color: #cbd5e1;
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.appNavLink.active {
+  background: rgba(251, 191, 36, 0.16);
+  color: #fde68a;
+}
+
+.appNavLink.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.appWorkspace {
+  min-width: 0;
+  padding: 32px;
+}
+
+.appHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.appHeader h1 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 46px;
+  line-height: 1;
+  letter-spacing: -0.05em;
+}
+
+.accountPanel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.78);
+  text-decoration: none;
+}
+
+.accountPanel:hover {
+  border-color: rgba(251, 191, 36, 0.54);
+  background: rgba(15, 23, 42, 0.96);
+}
+
+.profileAvatar.small {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  font-size: 20px;
+  flex: 0 0 auto;
+}
+
+.accountMeta {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.accountMeta strong {
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountMeta span {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.secondaryButton.compact {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 10px;
+}
+
+.uploadPanel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  margin-top: 28px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.filePicker {
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border: 1px dashed rgba(148, 163, 184, 0.42);
+  border-radius: 14px;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+
+.filePicker:hover {
+  border-color: rgba(251, 191, 36, 0.62);
+}
+
+.filePicker span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filePicker input {
+  display: none;
+}
+
+.filesPanel {
+  margin-top: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.72);
+  overflow: hidden;
+}
+
+.filesHeader,
+.fileRow {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.7fr) minmax(110px, 0.8fr) 100px 150px 170px;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 18px;
+}
+
+.filesHeader {
+  min-height: 48px;
+  background: rgba(2, 6, 23, 0.52);
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.fileRow {
+  min-height: 66px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+}
+
+.fileRow strong {
+  color: #ffffff;
+  overflow-wrap: anywhere;
+}
+
+.fileActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.fileActions button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 9px;
+  background: rgba(2, 6, 23, 0.3);
+  color: #dbeafe;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.fileActions button:hover {
+  border-color: rgba(251, 191, 36, 0.6);
+}
+
+.fileActions .dangerAction {
+  color: #fecaca;
+}
+
+.emptyFiles {
+  padding: 52px 24px;
+  text-align: center;
+}
+
+.emptyFiles h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+}
+
+.emptyFiles p {
+  max-width: 520px;
+  margin: 12px auto 0;
+  color: #94a3b8;
+  line-height: 1.6;
+}
+
 @media (max-width: 930px) {
   .topBar {
     align-items: flex-start;
@@ -583,6 +815,44 @@
 
   .chaosDesk {
     min-height: 560px;
+  }
+
+  .appShell {
+    grid-template-columns: 1fr;
+  }
+
+  .appSidebar {
+    border-right: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  }
+
+  .appBrand {
+    margin-bottom: 18px;
+  }
+
+  .appNav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .appHeader {
+    flex-direction: column;
+  }
+
+  .accountPanel {
+    width: 100%;
+  }
+
+  .filesHeader {
+    display: none;
+  }
+
+  .fileRow {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .fileActions {
+    justify-content: flex-start;
   }
 }
 
@@ -614,5 +884,26 @@
 
   .profileRow {
     gap: 6px;
+  }
+
+  .appWorkspace {
+    padding: 22px 16px;
+  }
+
+  .appSidebar {
+    padding: 22px 16px;
+  }
+
+  .appNav {
+    grid-template-columns: 1fr;
+  }
+
+  .uploadPanel {
+    grid-template-columns: 1fr;
+  }
+
+  .accountPanel {
+    align-items: flex-start;
+    flex-wrap: wrap;
   }
 }
