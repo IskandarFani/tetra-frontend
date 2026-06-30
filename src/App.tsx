@@ -1,10 +1,18 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 import "./App.css";
 
 type ApiMessageResponse = {
   status?: string;
   message?: string;
+  error?: string;
 };
 
 type AuthResponse = ApiMessageResponse & {
@@ -34,10 +42,79 @@ type FileRecord = {
   createdAt?: string;
 };
 
-type FileListResponse = FileRecord[] | ({ files?: FileRecord[] } & ApiMessageResponse) | null;
+type FolderRecord = {
+  id: string | number;
+  name: string;
+  parent_id?: string | number | null;
+  parentId?: string | number | null;
+  created_at?: string;
+  createdAt?: string;
+};
+
+type BreadcrumbItem = {
+  id: string | number | null;
+  name: string;
+};
+
+type FolderContentResponse = ApiMessageResponse & {
+  current_folder?: FolderRecord | null;
+  currentFolder?: FolderRecord | null;
+  breadcrumbs?: BreadcrumbItem[];
+  folders?: FolderRecord[];
+  files?: FileRecord[];
+};
+
+type FolderActionResponse = ApiMessageResponse & {
+  folder?: FolderRecord;
+};
+
+type FileActionResponse = ApiMessageResponse & {
+  file?: FileRecord;
+};
+
+type ConfirmDialogState =
+  | {
+      kind: "delete-file";
+      title: string;
+      body: string;
+      confirmText: string;
+      item: FileRecord;
+    }
+  | {
+      kind: "delete-folder";
+      title: string;
+      body: string;
+      confirmText: string;
+      item: FolderRecord;
+    };
+
+type ViewMode = "grid" | "list";
+type SortMode = "date-desc" | "name-asc" | "size-desc";
+
+type UploadProgress = {
+  current: number;
+  total: number;
+  fileName: string;
+};
+
+type ActionMenuState =
+  | {
+      kind: "file";
+      item: FileRecord;
+      x: number;
+      y: number;
+    }
+  | {
+      kind: "folder";
+      item: FolderRecord;
+      x: number;
+      y: number;
+    };
 
 const ACCESS_TOKEN_KEY = "accessToken";
 const REFRESH_TOKEN_KEY = "refreshToken";
+const ROOT_CRUMB: BreadcrumbItem = { id: null, name: "Мои файлы" };
+const MAX_PREVIEW_SIZE = 8 * 1024 * 1024;
 
 class AuthError extends Error {}
 
@@ -70,11 +147,29 @@ function hasSavedAccessToken() {
   return Boolean(localStorage.getItem(ACCESS_TOKEN_KEY));
 }
 
+async function readResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+
+  if (!text) {
+    return {} as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return { message: text } as T;
+  }
+}
+
+function getErrorMessage(data: ApiMessageResponse, fallback: string) {
+  return data.message || data.error || fallback;
+}
+
 async function refreshTokens() {
   const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
 
   if (!refreshToken) {
-    throw new Error("Refresh token is missing");
+    throw new AuthError("Refresh token is missing");
   }
 
   const response = await fetch("/api/auth/refresh", {
@@ -84,11 +179,10 @@ async function refreshTokens() {
     },
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
-
   const data = await readResponse<AuthResponse>(response);
 
   if (!response.ok) {
-    throw new Error(getErrorMessage(data, "Не удалось обновить сессию"));
+    throw new AuthError(getErrorMessage(data, "Не удалось обновить сессию"));
   }
 
   saveTokens(data);
@@ -96,17 +190,20 @@ async function refreshTokens() {
   const accessToken = getAccessToken(data);
 
   if (!accessToken) {
-    throw new Error("Backend did not return access token");
+    throw new AuthError("Backend did not return access token");
   }
 
   return accessToken;
 }
 
-async function fetchProfileWithRefresh() {
-  const response = await fetchWithAuth("/api/api/profile");
-  const data = await readResponse<CurrentUserResponse & ApiMessageResponse>(response);
+function withAuthorization(init: RequestInit, accessToken: string): RequestInit {
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${accessToken}`);
 
-  return { response, data };
+  return {
+    ...init,
+    headers,
+  };
 }
 
 async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}) {
@@ -122,43 +219,84 @@ async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}) {
     return response;
   }
 
-  let newAccessToken: string;
-
-  try {
-    newAccessToken = await refreshTokens();
-  } catch (error) {
-    throw new AuthError(error instanceof Error ? error.message : "Unable to refresh session");
-  }
-
+  const newAccessToken = await refreshTokens();
   return fetch(input, withAuthorization(init, newAccessToken));
 }
 
-function withAuthorization(init: RequestInit, accessToken: string): RequestInit {
-  const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${accessToken}`);
-
-  return {
-    ...init,
-    headers,
-  };
-}
-
-async function fetchFiles() {
-  const response = await fetchWithAuth("/api/api/files");
-  const data = await readResponse<FileListResponse>(response);
+async function fetchProfileWithRefresh() {
+  const response = await fetchWithAuth("/api/api/profile");
+  const data = await readResponse<CurrentUserResponse & ApiMessageResponse>(response);
 
   return { response, data };
 }
 
-async function uploadFile(file: File) {
+async function fetchFolderContent(folderID: string | number | null) {
+  const params = new URLSearchParams();
+
+  if (folderID !== null) {
+    params.set("folder_id", String(folderID));
+  }
+
+  const url = `/api/api/folders/content${params.toString() ? `?${params}` : ""}`;
+  const response = await fetchWithAuth(url);
+  const data = await readResponse<FolderContentResponse>(response);
+
+  return { response, data };
+}
+
+async function createFolder(name: string, parentID: string | number | null) {
+  const normalizedParentID = parentID === null ? null : Number(parentID);
+
+  const response = await fetchWithAuth("/api/api/folders", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name,
+      parent_id: normalizedParentID,
+    }),
+  });
+  const data = await readResponse<FolderActionResponse>(response);
+
+  return { response, data };
+}
+
+async function renameFolder(folderID: string | number, name: string) {
+  const response = await fetchWithAuth(`/api/api/folders/${folderID}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name }),
+  });
+  const data = await readResponse<FolderActionResponse>(response);
+
+  return { response, data };
+}
+
+async function deleteFolder(folderID: string | number) {
+  const response = await fetchWithAuth(`/api/api/folders/${folderID}`, {
+    method: "DELETE",
+  });
+  const data = await readResponse<ApiMessageResponse>(response);
+
+  return { response, data };
+}
+
+async function uploadSingleFile(file: File, folderID: string | number | null) {
   const formData = new FormData();
   formData.append("file", file);
+
+  if (folderID !== null) {
+    formData.append("folder_id", String(folderID));
+  }
 
   const response = await fetchWithAuth("/api/api/files", {
     method: "POST",
     body: formData,
   });
-  const data = await readResponse<ApiMessageResponse>(response);
+  const data = await readResponse<FileActionResponse>(response);
 
   return { response, data };
 }
@@ -191,25 +329,36 @@ async function downloadFile(file: FileRecord) {
   URL.revokeObjectURL(url);
 }
 
-async function readResponse<T>(response: Response): Promise<T> {
-  const text = await response.text();
+async function createFileObjectUrl(file: FileRecord) {
+  const response = await fetchWithAuth(`/api/api/files/${file.id}`);
 
-  if (!text) {
-    return {} as T;
+  if (!response.ok) {
+    return null;
   }
 
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return { message: text } as T;
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
+function normalizeFolderContent(data: FolderContentResponse) {
+  const breadcrumbs = data.breadcrumbs?.length ? data.breadcrumbs : [ROOT_CRUMB];
+  const normalizedBreadcrumbs = breadcrumbs.map((crumb, index) =>
+    index === 0 && crumb.id === null ? ROOT_CRUMB : crumb,
+  );
+
+  return {
+    currentFolder: data.current_folder ?? data.currentFolder ?? null,
+    breadcrumbs: normalizedBreadcrumbs,
+    folders: data.folders ?? [],
+    files: data.files ?? [],
+  };
+}
+
+function formatDate(value?: string) {
+  if (!value) {
+    return "—";
   }
-}
 
-function getErrorMessage(data: ApiMessageResponse, fallback: string) {
-  return data.message || fallback;
-}
-
-function formatProfileDate(value: string) {
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
@@ -218,17 +367,9 @@ function formatProfileDate(value: string) {
 
   return date.toLocaleDateString("ru-RU", {
     day: "2-digit",
-    month: "long",
+    month: "short",
     year: "numeric",
   });
-}
-
-function formatFileDate(value?: string) {
-  if (!value) {
-    return "—";
-  }
-
-  return formatProfileDate(value);
 }
 
 function formatFileSize(value?: number) {
@@ -260,12 +401,60 @@ function getFileCreatedAt(file: FileRecord) {
   return file.created_at ?? file.createdAt;
 }
 
-function getFilesFromResponse(data: FileListResponse) {
-  if (!data) {
-    return [];
+function getFolderCreatedAt(folder: FolderRecord) {
+  return folder.created_at ?? folder.createdAt;
+}
+
+function getFileKind(file: FileRecord) {
+  const name = getFileName(file).toLowerCase();
+  const mime = getFileMimeType(file).toLowerCase();
+
+  if (mime.includes("image") || /\.(png|jpe?g|webp|gif|svg)$/.test(name)) {
+    return "image";
   }
 
-  return Array.isArray(data) ? data : data.files ?? [];
+  if (mime.includes("pdf") || name.endsWith(".pdf")) {
+    return "pdf";
+  }
+
+  if (mime.includes("zip") || /\.(zip|rar|7z|tar|gz)$/.test(name)) {
+    return "archive";
+  }
+
+  if (mime.includes("text") || /\.(txt|md|csv|json|log)$/.test(name)) {
+    return "text";
+  }
+
+  if (/\.(docx?|xlsx?|pptx?)$/.test(name)) {
+    return "office";
+  }
+
+  return "file";
+}
+
+function isImageFile(file: FileRecord) {
+  return getFileKind(file) === "image" && (file.size ?? 0) <= MAX_PREVIEW_SIZE;
+}
+
+function IconFolder() {
+  return (
+    <svg viewBox="0 0 48 48" aria-hidden="true">
+      <path d="M5 13.5A5.5 5.5 0 0 1 10.5 8h10.2l4.2 4.5h12.6A5.5 5.5 0 0 1 43 18v17.5A5.5 5.5 0 0 1 37.5 41h-27A5.5 5.5 0 0 1 5 35.5v-22Z" />
+      <path d="M5 19h38v16.5A5.5 5.5 0 0 1 37.5 41h-27A5.5 5.5 0 0 1 5 35.5V19Z" />
+    </svg>
+  );
+}
+
+function IconFile({ kind }: { kind: string }) {
+  return (
+    <svg viewBox="0 0 48 48" aria-hidden="true">
+      <path d="M12 5h16l8 8v30H12V5Z" />
+      <path d="M28 5v9h8" />
+      <text x="24" y="31" textAnchor="middle">
+        {kind === "image" ? "IMG" : kind === "pdf" ? "PDF" : kind === "archive" ? "ZIP" : kind === "text" ? "TXT" : kind === "office" ? "DOC" : "FILE"}
+      </text>
+    </svg>
+  );
 }
 
 function WelcomePage() {
@@ -424,7 +613,6 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-
   const isRegister = mode === "register";
 
   if (hasSavedAccessToken()) {
@@ -433,7 +621,6 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     setErrorMessage("");
     setIsSubmitting(true);
 
@@ -445,25 +632,17 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
         },
         body: JSON.stringify({ email, password }),
       });
-
       const data = await readResponse<AuthResponse>(response);
 
       if (!response.ok) {
-        setErrorMessage(
-          getErrorMessage(
-            data,
-            isRegister ? "Не удалось зарегистрироваться" : "Не удалось войти",
-          ),
-        );
+        setErrorMessage(getErrorMessage(data, isRegister ? "Не удалось зарегистрироваться" : "Не удалось войти"));
         return;
       }
 
       saveTokens(data);
       navigate("/files");
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Backend is not available",
-      );
+      setErrorMessage(error instanceof Error ? error.message : "Backend is not available");
     } finally {
       setIsSubmitting(false);
     }
@@ -473,13 +652,11 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
     <main className="registerPage">
       <section className="registerCard">
         <p className="eyebrow">{isRegister ? "регистрация" : "вход"}</p>
-
         <h1>{isRegister ? "Создать аккаунт" : "Войти в Tetra"}</h1>
-
         <p className="registerDescription">
           {isRegister
-            ? "Введите email и пароль, чтобы создать аккаунт и перейти в личный профиль Tetra."
-            : "Введите email и пароль, чтобы войти в личный профиль Tetra."}
+            ? "Введите email и пароль, чтобы создать аккаунт и перейти в файловое пространство."
+            : "Введите email и пароль, чтобы открыть файловое пространство."}
         </p>
 
         <form className="form" onSubmit={handleSubmit}>
@@ -509,11 +686,7 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
           />
 
           <button type="submit" className="primaryButton" disabled={isSubmitting}>
-            {isSubmitting
-              ? "Проверяем..."
-              : isRegister
-                ? "Зарегистрироваться"
-                : "Войти"}
+            {isSubmitting ? "Проверяем..." : isRegister ? "Зарегистрироваться" : "Войти"}
           </button>
         </form>
 
@@ -531,109 +704,388 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
 
 function FilesPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const folderID = searchParams.get("folder_id");
+  const currentFolderID = folderID || null;
+
   const [user, setUser] = useState<CurrentUserResponse | null>(null);
+  const [currentFolder, setCurrentFolder] = useState<FolderRecord | null>(null);
+  const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([ROOT_CRUMB]);
+  const [folders, setFolders] = useState<FolderRecord[]>([]);
   const [files, setFiles] = useState<FileRecord[]>([]);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [folderNameDraft, setFolderNameDraft] = useState("");
+  const [renameTarget, setRenameTarget] = useState<FolderRecord | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [sortMode, setSortMode] = useState<SortMode>("date-desc");
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
+  const [actionMenu, setActionMenu] = useState<ActionMenuState | null>(null);
+  const [previewFile, setPreviewFile] = useState<FileRecord | null>(null);
+
+  const totalItems = folders.length + files.length;
+  const profileInitial = user?.email?.trim().charAt(0).toUpperCase() ?? "T";
+  const pageTitle = currentFolder?.name ?? "Мои файлы";
+
+  const selectedFilesLabel = useMemo(() => {
+    if (selectedFiles.length === 0) {
+      return "Выберите файлы";
+    }
+
+    if (selectedFiles.length === 1) {
+      return selectedFiles[0].name;
+    }
+
+    return `${selectedFiles.length} файла выбрано`;
+  }, [selectedFiles]);
+
+  const sortedFolders = useMemo(() => {
+    const nextFolders = [...folders];
+
+    return nextFolders.sort((left, right) => left.name.localeCompare(right.name, "ru"));
+  }, [folders]);
+
+  const sortedFiles = useMemo(() => {
+    const nextFiles = [...files];
+
+    return nextFiles.sort((left, right) => {
+      if (sortMode === "name-asc") {
+        return getFileName(left).localeCompare(getFileName(right), "ru");
+      }
+
+      if (sortMode === "size-desc") {
+        return (right.size ?? 0) - (left.size ?? 0);
+      }
+
+      return new Date(getFileCreatedAt(right) ?? 0).getTime() - new Date(getFileCreatedAt(left) ?? 0).getTime();
+    });
+  }, [files, sortMode]);
+
+  const sortLabel =
+    sortMode === "name-asc" ? "По имени" : sortMode === "size-desc" ? "По размеру" : "Сначала новые";
+
+  const previewUrl = previewFile ? previewUrls[String(previewFile.id)] : undefined;
 
   useEffect(() => {
-    const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
-
-    if (!accessToken) {
+    if (!hasSavedAccessToken()) {
       navigate("/login");
       return;
     }
 
+    let ignore = false;
+
     async function loadProfile() {
       try {
-        const { response: profileResponse, data: profileData } = await fetchProfileWithRefresh();
+        const { response, data } = await fetchProfileWithRefresh();
 
-        if (profileResponse.status === 401) {
+        if (response.status === 401) {
           clearTokens();
           navigate("/login");
-          setIsLoading(false);
           return;
         }
 
-        if (!profileResponse.ok) {
-          setErrorMessage(getErrorMessage(profileData, "Не удалось загрузить профиль"));
-          setIsLoading(false);
+        if (!response.ok) {
+          setErrorMessage(getErrorMessage(data, "Не удалось загрузить профиль"));
           return;
         }
 
-        setUser(profileData);
+        if (!ignore) {
+          setUser(data);
+        }
       } catch (error) {
         if (error instanceof AuthError) {
           clearTokens();
           navigate("/login");
-          setIsLoading(false);
           return;
         }
 
-        setErrorMessage(
-          error instanceof Error ? error.message : "Backend is not available",
-        );
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        const { response: filesResponse, data: filesData } = await fetchFiles();
-
-        if (filesResponse.ok) {
-          setFiles(getFilesFromResponse(filesData));
-        } else {
-          setErrorMessage(getErrorMessage(!filesData || Array.isArray(filesData) ? {} : filesData, "Файловый API пока недоступен"));
+        if (!ignore) {
+          setErrorMessage(error instanceof Error ? error.message : "Backend is not available");
         }
-      } catch (error) {
-        setErrorMessage(
-          error instanceof Error ? error.message : "Файловый API пока недоступен",
-        );
-      } finally {
-        setIsLoading(false);
       }
     }
 
     void loadProfile();
+
+    return () => {
+      ignore = true;
+    };
   }, [navigate]);
 
-  async function handleUpload(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    if (!hasSavedAccessToken()) {
+      return;
+    }
+
+    let ignore = false;
+
+    async function loadContent() {
+      setIsLoading(true);
+      setErrorMessage("");
+      setSuccessMessage("");
+
+      try {
+        const { response, data } = await fetchFolderContent(currentFolderID);
+
+        if (!response.ok) {
+          setErrorMessage(getErrorMessage(data, "Не удалось загрузить папку"));
+          return;
+        }
+
+        const normalized = normalizeFolderContent(data);
+
+        if (!ignore) {
+          setCurrentFolder(normalized.currentFolder);
+          setBreadcrumbs(normalized.breadcrumbs);
+          setFolders(normalized.folders);
+          setFiles(normalized.files);
+        }
+      } catch (error) {
+        if (error instanceof AuthError) {
+          clearTokens();
+          navigate("/login");
+          return;
+        }
+
+        if (!ignore) {
+          setErrorMessage(error instanceof Error ? error.message : "Файловый API недоступен");
+        }
+      } finally {
+        if (!ignore) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadContent();
+
+    return () => {
+      ignore = true;
+    };
+  }, [currentFolderID, navigate]);
+
+  useEffect(() => {
+    const imageFiles = files.filter(isImageFile);
+    let ignore = false;
+    const objectUrls: string[] = [];
+
+    async function loadPreviews() {
+      await Promise.resolve();
+
+      if (!ignore) {
+        setPreviewUrls({});
+      }
+
+      for (const file of imageFiles) {
+        const key = String(file.id);
+        const objectUrl = await createFileObjectUrl(file);
+
+        if (!objectUrl) {
+          continue;
+        }
+
+        if (ignore) {
+          URL.revokeObjectURL(objectUrl);
+          continue;
+        }
+
+        objectUrls.push(objectUrl);
+        setPreviewUrls((currentUrls) => ({
+          ...currentUrls,
+          [key]: objectUrl,
+        }));
+      }
+    }
+
+    void loadPreviews();
+
+    return () => {
+      ignore = true;
+      objectUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
+    };
+  }, [files]);
+
+  useEffect(() => {
+    if (!successMessage) {
+      return;
+    }
+
+    const timeoutID = window.setTimeout(() => setSuccessMessage(""), 2600);
+
+    return () => window.clearTimeout(timeoutID);
+  }, [successMessage]);
+
+  function openFolder(id: string | number | null) {
+    if (id === null) {
+      setSearchParams({});
+      return;
+    }
+
+    setSearchParams({ folder_id: String(id) });
+  }
+
+  async function reloadCurrentFolder() {
+    const { response, data } = await fetchFolderContent(currentFolderID);
+
+    if (!response.ok) {
+      setErrorMessage(getErrorMessage(data, "Не удалось обновить папку"));
+      return;
+    }
+
+    const normalized = normalizeFolderContent(data);
+    setCurrentFolder(normalized.currentFolder);
+    setBreadcrumbs(normalized.breadcrumbs);
+    setFolders(normalized.folders);
+    setFiles(normalized.files);
+  }
+
+  async function handleCreateFolder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = folderNameDraft.trim();
+
+    if (!name) {
+      setErrorMessage("Введите название папки");
+      return;
+    }
+
+    setPendingAction("create-folder");
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const { response, data } = await createFolder(name, currentFolderID);
+
+      if (!response.ok) {
+        setErrorMessage(getErrorMessage(data, "Не удалось создать папку"));
+        return;
+      }
+
+      setFolderNameDraft("");
+      setIsCreatingFolder(false);
+      await reloadCurrentFolder();
+      setSuccessMessage("Папка создана");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Не удалось создать папку");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function handleRenameFolder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!selectedFile) {
+    if (!renameTarget) {
+      return;
+    }
+
+    const name = renameDraft.trim();
+
+    if (!name) {
+      setErrorMessage("Введите новое название папки");
+      return;
+    }
+
+    setPendingAction("rename-folder");
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const { response, data } = await renameFolder(renameTarget.id, name);
+
+      if (!response.ok) {
+        setErrorMessage(getErrorMessage(data, "Не удалось переименовать папку"));
+        return;
+      }
+
+      setRenameTarget(null);
+      setRenameDraft("");
+      await reloadCurrentFolder();
+      setSuccessMessage("Папка переименована");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Не удалось переименовать папку");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  function handleFileSelection(event: ChangeEvent<HTMLInputElement>) {
+    const filesToUpload = Array.from(event.target.files ?? []);
+    event.target.value = "";
+
+    if (filesToUpload.length > 0) {
+      setSelectedFiles(filesToUpload);
+      void uploadFiles(filesToUpload);
+    }
+  }
+
+  function handleDragOver(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setIsDragActive(true);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLElement>) {
+    if (event.currentTarget === event.target) {
+      setIsDragActive(false);
+    }
+  }
+
+  function handleDrop(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setIsDragActive(false);
+
+    const droppedFiles = Array.from(event.dataTransfer.files ?? []);
+
+    if (droppedFiles.length > 0) {
+      setSelectedFiles(droppedFiles);
+      void uploadFiles(droppedFiles);
+    }
+  }
+
+  async function uploadFiles(filesToUpload: File[]) {
+    if (filesToUpload.length === 0) {
       setErrorMessage("Выберите файл для загрузки");
       return;
     }
 
+    setIsUploading(true);
+    setUploadProgress(null);
     setErrorMessage("");
     setSuccessMessage("");
-    setIsUploading(true);
 
     try {
-      const { response, data } = await uploadFile(selectedFile);
+      for (const [index, file] of filesToUpload.entries()) {
+        setUploadProgress({
+          current: index + 1,
+          total: filesToUpload.length,
+          fileName: file.name,
+        });
 
-      if (!response.ok) {
-        setErrorMessage(getErrorMessage(data, "Не удалось загрузить файл"));
-        return;
+        const { response, data } = await uploadSingleFile(file, currentFolderID);
+
+        if (!response.ok) {
+          setErrorMessage(getErrorMessage(data, `Не удалось загрузить ${file.name}`));
+          return;
+        }
       }
 
-      const { response: filesResponse, data: filesData } = await fetchFiles();
-
-      if (filesResponse.ok) {
-        setFiles(getFilesFromResponse(filesData));
-      }
-
-      setSelectedFile(null);
-      setSuccessMessage("Файл загружен");
+      setSelectedFiles([]);
+      await reloadCurrentFolder();
+      setSuccessMessage(filesToUpload.length === 1 ? "Файл загружен" : "Файлы загружены");
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Backend is not available",
-      );
+      setErrorMessage(error instanceof Error ? error.message : "Не удалось загрузить файл");
     } finally {
       setIsUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -643,34 +1095,80 @@ function FilesPage() {
     try {
       await downloadFile(file);
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Не удалось скачать файл",
-      );
+      setErrorMessage(error instanceof Error ? error.message : "Не удалось скачать файл");
     }
   }
 
-  async function handleDelete(file: FileRecord) {
+  function handleOpenFile(file: FileRecord) {
+    if (previewUrls[String(file.id)]) {
+      setPreviewFile(file);
+      return;
+    }
+
+    void handleDownload(file);
+  }
+
+  function requestDeleteFile(file: FileRecord) {
+    setActionMenu(null);
+    setConfirmDialog({
+      kind: "delete-file",
+      title: `Удалить файл «${getFileName(file)}»?`,
+      body: "Файл будет удалён из текущей папки.",
+      confirmText: "Удалить файл",
+      item: file,
+    });
+  }
+
+  function requestDeleteFolder(folder: FolderRecord) {
+    setActionMenu(null);
+    setConfirmDialog({
+      kind: "delete-folder",
+      title: `Удалить папку «${folder.name}»?`,
+      body: "Будут удалены все вложенные папки и файлы внутри. Это действие нельзя отменить.",
+      confirmText: "Удалить папку",
+      item: folder,
+    });
+  }
+
+  async function handleConfirmDelete() {
+    if (!confirmDialog) {
+      return;
+    }
+
+    setPendingAction("delete");
     setErrorMessage("");
     setSuccessMessage("");
 
     try {
-      const { response, data } = await deleteFile(file.id);
+      if (confirmDialog.kind === "delete-file") {
+        const { response, data } = await deleteFile(confirmDialog.item.id);
 
-      if (!response.ok) {
-        setErrorMessage(getErrorMessage(data, "Не удалось удалить файл"));
-        return;
+        if (!response.ok) {
+          setErrorMessage(getErrorMessage(data, "Не удалось удалить файл"));
+          return;
+        }
+
+        setFiles((currentFiles) => currentFiles.filter((file) => file.id !== confirmDialog.item.id));
+        setSuccessMessage("Файл удалён");
+      } else {
+        const { response, data } = await deleteFolder(confirmDialog.item.id);
+
+        if (!response.ok) {
+          setErrorMessage(getErrorMessage(data, "Не удалось удалить папку"));
+          return;
+        }
+
+        await reloadCurrentFolder();
+        setSuccessMessage("Папка удалена");
       }
 
-      setFiles((currentFiles) => currentFiles.filter((currentFile) => currentFile.id !== file.id));
-      setSuccessMessage("Файл удалён");
+      setConfirmDialog(null);
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Не удалось удалить файл",
-      );
+      setErrorMessage(error instanceof Error ? error.message : "Не удалось удалить");
+    } finally {
+      setPendingAction(null);
     }
   }
-
-  const profileInitial = user?.email?.trim().charAt(0).toUpperCase() ?? "T";
 
   return (
     <main className="appShell">
@@ -681,17 +1179,39 @@ function FilesPage() {
         </Link>
 
         <nav className="appNav">
-          <a className="appNavLink active" href="#files">Файлы</a>
-          <a className="appNavLink disabled" href="#search">Поиск</a>
-          <a className="appNavLink disabled" href="#trash">Корзина</a>
+          <button className="appNavLink active" type="button" onClick={() => openFolder(null)}>
+            <span className="navIcon">▦</span>
+            Файлы
+          </button>
+          <button className="appNavLink disabled" type="button" disabled>
+            <span className="navIcon">⌕</span>
+            Поиск
+          </button>
+          <button className="appNavLink disabled" type="button" disabled>
+            <span className="navIcon">⌫</span>
+            Корзина
+          </button>
         </nav>
       </aside>
 
-      <section className="appWorkspace" id="files">
+      <section className="appWorkspace">
         <header className="appHeader">
-          <div>
-            <p className="eyebrow">личное хранилище</p>
-            <h1>Файлы</h1>
+          <div className="headerTitle">
+            <div className="breadcrumbs" aria-label="Путь">
+              {breadcrumbs.map((crumb, index) => (
+                <button
+                  className="breadcrumbButton"
+                  key={`${crumb.id ?? "root"}-${index}`}
+                  type="button"
+                  onClick={() => openFolder(crumb.id)}
+                >
+                  {index > 0 && <span className="breadcrumbSep">/</span>}
+                  <span>{crumb.name}</span>
+                </button>
+              ))}
+            </div>
+            <h1>{pageTitle}</h1>
+            <p>{totalItems} объектов</p>
           </div>
 
           <Link className="accountPanel" to="/profile">
@@ -700,63 +1220,390 @@ function FilesPage() {
             </div>
             <div className="accountMeta">
               <strong>{user?.email ?? "Аккаунт"}</strong>
-              {user?.created_at && <span>с {formatProfileDate(user.created_at)}</span>}
+              {user?.created_at && <span>с {formatDate(user.created_at)}</span>}
             </div>
           </Link>
         </header>
 
-        <form className="uploadPanel" onSubmit={handleUpload}>
-          <label className="filePicker">
-            <span>{selectedFile ? selectedFile.name : "Выберите файл"}</span>
-            <input
-              type="file"
-              onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
-            />
-          </label>
-          <button type="submit" className="primaryButton" disabled={isUploading}>
-            {isUploading ? "Загружаем..." : "Загрузить"}
-          </button>
-        </form>
+        <div className="workspaceToolbar">
+          <div className="toolbarGroup">
+            <button className="toolbarButton primaryTool" type="button" onClick={() => setIsCreatingFolder(true)}>
+              <span>+</span>
+              Папка
+            </button>
 
-        {isLoading && <p className="registerDescription">Загружаем файловое пространство...</p>}
-        {successMessage && <p className="successMessage">{successMessage}</p>}
-        {errorMessage && <p className="errorMessage">Ошибка: {errorMessage}</p>}
-
-        <div className="filesPanel">
-          <div className="filesHeader">
-            <span>Название</span>
-            <span>Тип</span>
-            <span>Размер</span>
-            <span>Добавлен</span>
-            <span>Действия</span>
+            <div className="uploadControl">
+              <label className={`toolbarButton uploadPicker ${isUploading ? "disabled" : ""}`}>
+                <span>⇧</span>
+                {isUploading ? "Загружаю..." : selectedFiles.length > 0 ? selectedFilesLabel : "Загрузить файлы"}
+                <input disabled={isUploading} multiple type="file" onChange={handleFileSelection} />
+              </label>
+            </div>
           </div>
 
-          {!isLoading && files.length === 0 && (
-            <div className="emptyFiles">
-              <h2>Здесь пока пусто</h2>
-              <p>Когда backend для файлов будет готов, загруженные документы появятся в этом списке.</p>
-            </div>
-          )}
+          <div className="toolbarGroup toolbarGroupRight">
+            <div className="sortMenu">
+              <button
+                className="sortControl"
+                type="button"
+                aria-expanded={isSortMenuOpen}
+                onClick={() => setIsSortMenuOpen((isOpen) => !isOpen)}
+              >
+                <span>Сортировка</span>
+                <strong>{sortLabel}</strong>
+                <span aria-hidden="true">⌄</span>
+              </button>
 
-          {files.map((file) => (
-            <div className="fileRow" key={file.id}>
-              <strong>{getFileName(file)}</strong>
-              <span>{getFileMimeType(file)}</span>
-              <span>{formatFileSize(file.size)}</span>
-              <span>{formatFileDate(getFileCreatedAt(file))}</span>
-              <div className="fileActions">
-                <button type="button" onClick={() => void handleDownload(file)}>
-                  Скачать
-                </button>
-                <button type="button" className="dangerAction" onClick={() => void handleDelete(file)}>
-                  Удалить
+              {isSortMenuOpen && (
+                <div className="sortMenuList">
+                  {[
+                    ["date-desc", "Сначала новые"],
+                    ["name-asc", "По имени"],
+                    ["size-desc", "По размеру"],
+                  ].map(([value, label]) => (
+                    <button
+                      className={sortMode === value ? "active" : ""}
+                      key={value}
+                      type="button"
+                      onClick={() => {
+                        setSortMode(value as SortMode);
+                        setIsSortMenuOpen(false);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="viewSwitch" aria-label="Режим отображения">
+              <button
+                className={viewMode === "grid" ? "active" : ""}
+                type="button"
+                onClick={() => setViewMode("grid")}
+              >
+                Плитка
+              </button>
+              <button
+                className={viewMode === "list" ? "active" : ""}
+                type="button"
+                onClick={() => setViewMode("list")}
+              >
+                Список
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {uploadProgress && (
+          <div className="uploadProgress">
+            <div>
+              <strong>
+                Загружается {uploadProgress.current} из {uploadProgress.total}
+              </strong>
+              <span>{uploadProgress.fileName}</span>
+            </div>
+            <progress value={uploadProgress.current} max={uploadProgress.total} />
+          </div>
+        )}
+
+        {errorMessage && <p className="errorMessage">Ошибка: {errorMessage}</p>}
+        {successMessage && <div className="toastMessage">{successMessage}</div>}
+
+        <section
+          className={`fileSurface ${viewMode === "list" ? "listSurface" : ""} ${isDragActive ? "dragActive" : ""}`}
+          aria-busy={isLoading}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          {isDragActive && <div className="dropHint">Отпустите файлы, загрузка начнётся сразу</div>}
+
+          {isLoading ? (
+            <div className="loadingState">Загружаем файловое пространство...</div>
+          ) : totalItems === 0 ? (
+            <div className="emptyState">
+              <div className="emptyDropIcon">⇧</div>
+              <h2>Папка пуста</h2>
+              <p>Перетащите файлы сюда, загрузите их через кнопку или создайте папку для будущего порядка.</p>
+              <div className="emptyActions">
+                <label className={`toolbarButton uploadPicker ${isUploading ? "disabled" : ""}`}>
+                  <span>⇧</span>
+                  {isUploading ? "Загружаю..." : "Загрузить файлы"}
+                  <input disabled={isUploading} multiple type="file" onChange={handleFileSelection} />
+                </label>
+                <button className="toolbarButton primaryTool" type="button" onClick={() => setIsCreatingFolder(true)}>
+                  <span>+</span>
+                  Папка
                 </button>
               </div>
             </div>
-          ))}
-        </div>
+          ) : (
+            <div className={`contentSections ${viewMode === "list" ? "listView" : ""}`}>
+              {sortedFolders.length > 0 && (
+                <section className="contentGroup">
+                  <div className="contentGroupHeader">
+                    <h2>Папки</h2>
+                    <span>{sortedFolders.length}</span>
+                  </div>
+
+                  <div className="itemGrid">
+                    {viewMode === "list" && (
+                      <div className="listHeader" aria-hidden="true">
+                        <span>Название</span>
+                        <span>Тип</span>
+                        <span>Добавлен</span>
+                        <span></span>
+                      </div>
+                    )}
+
+                    {sortedFolders.map((folder) => (
+                      <article className="fsItem folderItem" key={`folder-${folder.id}`}>
+                        <button className="itemOpenButton" type="button" onClick={() => openFolder(folder.id)}>
+                          <span className="itemIcon folderIcon">
+                            <IconFolder />
+                          </span>
+                          <span className="itemName">{folder.name}</span>
+                          <span className="itemMeta">
+                            <span className="itemSize">Папка</span>
+                            <span className="itemDate">{formatDate(getFolderCreatedAt(folder))}</span>
+                          </span>
+                        </button>
+
+                        <div className="itemActions">
+                          <button
+                            type="button"
+                            title="Действия"
+                            onClick={(event) =>
+                              setActionMenu((currentMenu) =>
+                                currentMenu?.kind === "folder" && currentMenu.item.id === folder.id
+                                  ? null
+                                  : { kind: "folder", item: folder, x: event.clientX, y: event.clientY },
+                              )
+                            }
+                          >
+                            ...
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {sortedFiles.length > 0 && (
+                <section className="contentGroup">
+                  <div className="contentGroupHeader">
+                    <h2>Файлы</h2>
+                    <span>{sortedFiles.length}</span>
+                  </div>
+
+                  <div className="itemGrid">
+                    {viewMode === "list" && (
+                      <div className="listHeader" aria-hidden="true">
+                        <span>Название</span>
+                        <span>Размер</span>
+                        <span>Добавлен</span>
+                        <span></span>
+                      </div>
+                    )}
+
+                    {sortedFiles.map((file) => {
+                      const kind = getFileKind(file);
+                      const filePreviewUrl = previewUrls[String(file.id)];
+
+                      return (
+                        <article className={`fsItem fileItem ${kind}`} key={`file-${file.id}`}>
+                          <button className="itemOpenButton" type="button" onClick={() => handleOpenFile(file)}>
+                            <span className="itemIcon fileIcon">
+                              {filePreviewUrl ? <img src={filePreviewUrl} alt="" /> : <IconFile kind={kind} />}
+                            </span>
+                            <span className="itemName">{getFileName(file)}</span>
+                            <span className="itemMeta">
+                              <span className="itemSize">{formatFileSize(file.size)}</span>
+                              <span className="itemDate">{formatDate(getFileCreatedAt(file))}</span>
+                            </span>
+                          </button>
+
+                          <div className="itemActions">
+                            <button
+                              type="button"
+                              title="Действия"
+                              onClick={(event) =>
+                                setActionMenu((currentMenu) =>
+                                  currentMenu?.kind === "file" && currentMenu.item.id === file.id
+                                    ? null
+                                    : { kind: "file", item: file, x: event.clientX, y: event.clientY },
+                                )
+                              }
+                            >
+                              ...
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+        </section>
       </section>
+
+      {actionMenu && (
+        <div className="floatingActionMenu" style={{ left: actionMenu.x, top: actionMenu.y }}>
+          {actionMenu.kind === "folder" ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setRenameTarget(actionMenu.item);
+                  setRenameDraft(actionMenu.item.name);
+                  setActionMenu(null);
+                }}
+              >
+                Переименовать
+              </button>
+              <button className="dangerMenuButton" type="button" onClick={() => requestDeleteFolder(actionMenu.item)}>
+                Удалить
+              </button>
+            </>
+          ) : (
+            <>
+              {previewUrls[String(actionMenu.item.id)] && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviewFile(actionMenu.item);
+                    setActionMenu(null);
+                  }}
+                >
+                  Открыть
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  void handleDownload(actionMenu.item);
+                  setActionMenu(null);
+                }}
+              >
+                Скачать
+              </button>
+              <button className="dangerMenuButton" type="button" onClick={() => requestDeleteFile(actionMenu.item)}>
+                Удалить
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {isCreatingFolder && (
+        <Modal title="Новая папка" onClose={() => setIsCreatingFolder(false)}>
+          <form className="modalForm" onSubmit={handleCreateFolder}>
+            <label htmlFor="new-folder-name">Название</label>
+            <input
+              id="new-folder-name"
+              autoFocus
+              value={folderNameDraft}
+              onChange={(event) => setFolderNameDraft(event.target.value)}
+            />
+            <div className="modalActions">
+              <button className="ghostButton" type="button" onClick={() => setIsCreatingFolder(false)}>
+                Отмена
+              </button>
+              <button className="primaryButton" type="submit" disabled={pendingAction === "create-folder"}>
+                Создать
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {renameTarget && (
+        <Modal title="Переименовать папку" onClose={() => setRenameTarget(null)}>
+          <form className="modalForm" onSubmit={handleRenameFolder}>
+            <label htmlFor="rename-folder-name">Название</label>
+            <input
+              id="rename-folder-name"
+              autoFocus
+              value={renameDraft}
+              onChange={(event) => setRenameDraft(event.target.value)}
+            />
+            <div className="modalActions">
+              <button className="ghostButton" type="button" onClick={() => setRenameTarget(null)}>
+                Отмена
+              </button>
+              <button className="primaryButton" type="submit" disabled={pendingAction === "rename-folder"}>
+                Сохранить
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {previewFile && previewUrl && (
+        <Modal title={getFileName(previewFile)} onClose={() => setPreviewFile(null)}>
+          <div className="previewDialog">
+            <img src={previewUrl} alt={getFileName(previewFile)} />
+            <div className="previewMeta">
+              <span>{formatFileSize(previewFile.size)}</span>
+              <span>{formatDate(getFileCreatedAt(previewFile))}</span>
+            </div>
+            <div className="modalActions">
+              <button className="ghostButton" type="button" onClick={() => void handleDownload(previewFile)}>
+                Скачать
+              </button>
+              <button className="primaryButton" type="button" onClick={() => setPreviewFile(null)}>
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {confirmDialog && (
+        <Modal title={confirmDialog.title} onClose={() => setConfirmDialog(null)}>
+          <div className="confirmDialog">
+            <p>{confirmDialog.body}</p>
+            <div className="modalActions">
+              <button className="ghostButton" type="button" onClick={() => setConfirmDialog(null)}>
+                Отмена
+              </button>
+              <button className="dangerButton" type="button" disabled={pendingAction === "delete"} onClick={() => void handleConfirmDelete()}>
+                {confirmDialog.confirmText}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </main>
+  );
+}
+
+function Modal({
+  title,
+  children,
+  onClose,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modalOverlay" role="presentation" onMouseDown={onClose}>
+      <section className="modalPanel" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
+        <header className="modalHeader">
+          <h2>{title}</h2>
+          <button type="button" aria-label="Закрыть" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        {children}
+      </section>
+    </div>
   );
 }
 
@@ -795,9 +1642,7 @@ function ProfilePage() {
           return;
         }
 
-        setErrorMessage(
-          error instanceof Error ? error.message : "Backend is not available",
-        );
+        setErrorMessage(error instanceof Error ? error.message : "Backend is not available");
       } finally {
         setIsLoading(false);
       }
@@ -824,9 +1669,7 @@ function ProfilePage() {
           </div>
           <div>
             <h1>Профиль пользователя</h1>
-            <p className="profileSubtitle">
-              Сведения об аккаунте Tetra.
-            </p>
+            <p className="profileSubtitle">Сведения об аккаунте Tetra.</p>
           </div>
         </div>
 
@@ -855,7 +1698,7 @@ function ProfilePage() {
             {user.created_at && (
               <div className="profileRow">
                 <span>Дата регистрации</span>
-                <strong>{formatProfileDate(user.created_at)}</strong>
+                <strong>{formatDate(user.created_at)}</strong>
               </div>
             )}
           </div>
