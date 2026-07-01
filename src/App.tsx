@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import {
   Link,
   Navigate,
@@ -51,6 +51,8 @@ type FolderRecord = {
   parentId?: string | number | null;
   created_at?: string;
   createdAt?: string;
+  preview_files?: FileRecord[];
+  previewFiles?: FileRecord[];
 };
 
 type BreadcrumbItem = {
@@ -460,6 +462,10 @@ function getFolderCreatedAt(folder: FolderRecord) {
   return folder.created_at ?? folder.createdAt;
 }
 
+function getFolderPreviewFiles(folder: FolderRecord) {
+  return folder.preview_files ?? folder.previewFiles ?? [];
+}
+
 function getFileKind(file: FileRecord) {
   const name = getFileName(file).toLowerCase();
   const mime = getFileMimeType(file).toLowerCase();
@@ -760,6 +766,7 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
 function FilesPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const listPreviewPaneRef = useRef<HTMLElement | null>(null);
   const folderID = searchParams.get("folder_id");
   const currentFolderID = folderID || null;
 
@@ -935,7 +942,9 @@ function FilesPage() {
   }, [currentFolderID, navigate]);
 
   useEffect(() => {
-    const imageFiles = files.filter(isImageFile);
+    const folderPreviewImageFiles = folders.flatMap(getFolderPreviewFiles).filter(isImageFile);
+    const imageFiles = [...files, ...folderPreviewImageFiles].filter(isImageFile);
+    const uniqueImageFiles = Array.from(new Map(imageFiles.map((file) => [String(file.id), file])).values());
     let ignore = false;
     const objectUrls: string[] = [];
 
@@ -946,7 +955,7 @@ function FilesPage() {
         setPreviewUrls({});
       }
 
-      for (const file of imageFiles) {
+      for (const file of uniqueImageFiles) {
         const key = String(file.id);
         const objectUrl = await createFileObjectUrl(file);
 
@@ -973,7 +982,7 @@ function FilesPage() {
       ignore = true;
       objectUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
     };
-  }, [files]);
+  }, [files, folders]);
 
   useEffect(() => {
     if (!successMessage) {
@@ -1077,6 +1086,10 @@ function FilesPage() {
       }
     };
   }, [previewUrls, selectedPreviewFile, viewMode]);
+
+  useEffect(() => {
+    listPreviewPaneRef.current?.scrollTo({ top: 0 });
+  }, [selectedPreviewFile?.id]);
 
   useEffect(() => {
     if (!actionMenu) {
@@ -1706,43 +1719,62 @@ function FilesPage() {
                       </div>
                     )}
 
-                    {sortedFolders.map((folder) => (
-                      <article
-                        className={`fsItem folderItem ${String(dropTargetFolderID) === String(folder.id) ? "dropTarget" : ""}`}
-                        key={`folder-${folder.id}`}
-                        onDragLeave={(event) => handleFolderDragLeave(event, folder)}
-                        onDragOver={(event) => handleFolderDragOver(event, folder)}
-                        onDrop={(event) => void handleFolderDrop(event, folder)}
-                      >
-                        <button className="itemOpenButton" type="button" onClick={() => openFolder(folder.id)}>
-                          <span className="itemIcon folderIcon">
-                            <IconFolder />
-                          </span>
-                          <span className="itemName">{folder.name}</span>
-                          <span className="itemMeta">
-                            <span className="itemSize">Папка</span>
-                            <span className="itemDate">{formatDate(getFolderCreatedAt(folder))}</span>
-                          </span>
-                        </button>
+                    {sortedFolders.map((folder) => {
+                      const folderPreviewFiles = getFolderPreviewFiles(folder).slice(0, 4);
 
-                        <div className="itemActions">
-                          <button
-                            type="button"
-                            title="Действия"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setActionMenu((currentMenu) =>
-                                currentMenu?.kind === "folder" && currentMenu.item.id === folder.id
-                                  ? null
-                                  : { kind: "folder", item: folder, x: event.clientX, y: event.clientY },
-                              );
-                            }}
-                          >
-                            ...
+                      return (
+                        <article
+                          className={`fsItem folderItem ${String(dropTargetFolderID) === String(folder.id) ? "dropTarget" : ""}`}
+                          key={`folder-${folder.id}`}
+                          onDragLeave={(event) => handleFolderDragLeave(event, folder)}
+                          onDragOver={(event) => handleFolderDragOver(event, folder)}
+                          onDrop={(event) => void handleFolderDrop(event, folder)}
+                        >
+                          <button className="itemOpenButton" type="button" onClick={() => openFolder(folder.id)}>
+                            <span className={`itemIcon folderIcon ${folderPreviewFiles.length > 0 ? "withFolderPreview" : ""}`}>
+                              {folderPreviewFiles.length > 0 ? (
+                                <span className="folderPreviewStack" aria-hidden="true">
+                                  {folderPreviewFiles.map((file) => {
+                                    const previewUrl = previewUrls[String(file.id)];
+                                    const kind = getFileKind(file);
+
+                                    return (
+                                      <span className={`folderPreviewTile ${kind}`} key={`folder-preview-${folder.id}-${file.id}`}>
+                                        {previewUrl ? <img src={previewUrl} alt="" /> : <IconFile kind={kind} />}
+                                      </span>
+                                    );
+                                  })}
+                                </span>
+                              ) : (
+                                <IconFolder />
+                              )}
+                            </span>
+                            <span className="itemName">{folder.name}</span>
+                            <span className="itemMeta">
+                              <span className="itemSize">Папка</span>
+                              <span className="itemDate">{formatDate(getFolderCreatedAt(folder))}</span>
+                            </span>
                           </button>
-                        </div>
-                      </article>
-                    ))}
+
+                          <div className="itemActions">
+                            <button
+                              type="button"
+                              title="Действия"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setActionMenu((currentMenu) =>
+                                  currentMenu?.kind === "folder" && currentMenu.item.id === folder.id
+                                    ? null
+                                    : { kind: "folder", item: folder, x: event.clientX, y: event.clientY },
+                                );
+                              }}
+                            >
+                              ...
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
                   </div>
                 </section>
               )}
@@ -1828,7 +1860,7 @@ function FilesPage() {
               </div>
 
               {shouldShowListPreview && (
-                <aside className="listPreviewPane" aria-label="Предпросмотр файла">
+                <aside className="listPreviewPane" ref={listPreviewPaneRef} aria-label="Предпросмотр файла">
                   {selectedPreviewFile ? (
                     <>
                       <div className={`listPreviewMedia ${getFileKind(selectedPreviewFile)}`}>
