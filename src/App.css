@@ -610,7 +610,7 @@ button:disabled {
 
 .appWorkspace {
   min-width: 0;
-  padding: 28px;
+  padding: 22px 28px;
 }
 
 .appHeader {
@@ -625,15 +625,15 @@ button:disabled {
 }
 
 .headerTitle h1 {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: #ffffff;
-  font-size: 42px;
+  font-size: 38px;
   line-height: 1.05;
   overflow-wrap: anywhere;
 }
 
 .headerTitle p {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: #94a3b8;
 }
 
@@ -759,8 +759,8 @@ button:disabled {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
-  margin-top: 24px;
-  padding: 10px;
+  margin-top: 18px;
+  padding: 8px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 12px;
   background: rgba(2, 6, 23, 0.22);
@@ -779,7 +779,7 @@ button:disabled {
 }
 
 .toolbarButton {
-  min-height: 44px;
+  min-height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -980,8 +980,8 @@ button:disabled {
 .fileSurface {
   position: relative;
   min-height: 0;
-  margin-top: 18px;
-  padding: 14px;
+  margin-top: 14px;
+  padding: 12px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 14px;
   background: rgba(15, 23, 42, 0.5);
@@ -1010,13 +1010,13 @@ button:disabled {
 
 .contentSections {
   display: grid;
-  gap: 20px;
+  gap: 14px;
 }
 
 .contentMainColumn {
   min-width: 0;
   display: grid;
-  gap: 20px;
+  gap: 14px;
 }
 
 .withPreviewPane {
@@ -1277,7 +1277,7 @@ button:disabled {
 
 .listView.withPreviewPane {
   grid-template-columns: minmax(560px, 1.15fr) minmax(420px, 0.85fr);
-  gap: 24px;
+  gap: 20px;
 }
 
 .listView .itemGrid {
@@ -1303,7 +1303,7 @@ button:disabled {
 
 .listView .fsItem {
   width: 100%;
-  min-height: 52px;
+  min-height: 48px;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: 1fr;
 }
@@ -1315,7 +1315,7 @@ button:disabled {
     "icon name size date";
   column-gap: 12px;
   align-items: center;
-  padding: 7px 12px;
+  padding: 6px 12px;
 }
 
 .listView .itemIcon {
@@ -1376,19 +1376,19 @@ button:disabled {
 
 .listPreviewPane {
   position: sticky;
-  top: 18px;
-  min-height: min(680px, calc(100vh - 36px));
+  top: 12px;
+  min-height: 0;
   display: grid;
   align-content: start;
-  gap: 18px;
-  padding: 18px;
+  gap: 12px;
+  padding: 14px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 12px;
   background: rgba(2, 6, 23, 0.36);
 }
 
 .listPreviewMedia {
-  min-height: 360px;
+  min-height: clamp(240px, 38vh, 360px);
   display: grid;
   place-items: center;
   border: 1px solid rgba(148, 163, 184, 0.14);
@@ -1399,22 +1399,22 @@ button:disabled {
 
 .listPreviewMedia img {
   width: 100%;
-  max-height: 430px;
+  max-height: clamp(240px, 38vh, 360px);
   display: block;
   object-fit: contain;
 }
 
 .listPreviewMedia iframe {
   width: 100%;
-  height: 430px;
+  height: clamp(260px, 42vh, 380px);
   border: 0;
   background: #ffffff;
 }
 
 .listPreviewMedia pre {
   width: 100%;
-  min-height: 360px;
-  max-height: 430px;
+  min-height: clamp(240px, 38vh, 340px);
+  max-height: clamp(240px, 38vh, 340px);
   margin: 0;
   padding: 14px;
   overflow: auto;
@@ -1537,25 +1537,25 @@ button:disabled {
   .withPreviewPane,
   .listView.withPreviewPane {
     grid-template-columns: minmax(500px, 1fr) minmax(360px, 0.82fr);
-    gap: 18px;
+    gap: 16px;
   }
 
   .listPreviewMedia {
-    min-height: 300px;
+    min-height: clamp(220px, 34vh, 300px);
   }
 
   .listPreviewMedia img,
   .listPreviewMedia iframe {
-    max-height: 360px;
+    max-height: clamp(220px, 34vh, 300px);
   }
 
   .listPreviewMedia iframe {
-    height: 360px;
+    height: clamp(240px, 38vh, 320px);
   }
 
   .listPreviewMedia pre {
-    min-height: 300px;
-    max-height: 360px;
+    min-height: clamp(220px, 34vh, 300px);
+    max-height: clamp(220px, 34vh, 300px);
   }
 }
 
