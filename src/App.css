@@ -565,6 +565,10 @@ button:disabled {
   background: rgba(3, 7, 18, 0.58);
 }
 
+.appSidebarTop {
+  min-width: 0;
+}
+
 .appBrand {
   margin-bottom: 28px;
 }
@@ -679,6 +683,10 @@ button:disabled {
 
 .accountPanel:hover {
   border-color: rgba(251, 191, 36, 0.48);
+}
+
+.mobileAccountPanel {
+  display: none;
 }
 
 .profileAvatar.small {
@@ -1592,8 +1600,16 @@ button:disabled {
     backdrop-filter: blur(14px);
   }
 
-  .appBrand {
+  .appSidebarTop {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
     margin-bottom: 12px;
+  }
+
+  .appBrand {
+    margin-bottom: 0;
   }
 
   .appNav {
@@ -1613,9 +1629,16 @@ button:disabled {
     font-size: 36px;
   }
 
-  .accountPanel {
-    width: 100%;
-    max-width: none;
+  .headerAccountPanel {
+    display: none;
+  }
+
+  .mobileAccountPanel {
+    min-width: 0;
+    max-width: min(320px, 50vw);
+    display: flex;
+    padding: 7px;
+    border-radius: 12px;
   }
 }
 
@@ -1788,8 +1811,14 @@ button:disabled {
     padding: 12px 14px;
   }
 
+  .appSidebarTop {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
   .appBrand {
-    margin-bottom: 10px;
+    flex: 0 0 auto;
+    margin-bottom: 0;
   }
 
   .appNav {
@@ -1830,18 +1859,29 @@ button:disabled {
     line-height: 1;
   }
 
-  .accountPanel {
+  .mobileAccountPanel {
+    flex: 1 1 auto;
     min-width: 0;
-    padding: 8px;
+    max-width: none;
+    justify-content: flex-end;
+    padding: 7px;
+    background: transparent;
+    border-color: transparent;
   }
 
   .profileAvatar.small {
-    width: 38px;
-    height: 38px;
-    font-size: 17px;
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
+
+  .mobileAccountPanel .accountMeta {
+    max-width: min(180px, 42vw);
+    text-align: right;
   }
 
   .accountMeta span {
+    display: none;
     font-size: 12px;
   }
 

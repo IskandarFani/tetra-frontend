@@ -1287,10 +1287,22 @@ function FilesPage() {
   return (
     <main className="appShell">
       <aside className="appSidebar">
-        <Link className="brand appBrand" to="/files">
-          <span className="brandMark">T</span>
-          <span>Tetra</span>
-        </Link>
+        <div className="appSidebarTop">
+          <Link className="brand appBrand" to="/files">
+            <span className="brandMark">T</span>
+            <span>Tetra</span>
+          </Link>
+
+          <Link className="accountPanel mobileAccountPanel" to="/profile">
+            <div className="profileAvatar small" aria-hidden="true">
+              {profileInitial}
+            </div>
+            <div className="accountMeta">
+              <strong>{user?.email ?? "Аккаунт"}</strong>
+              {user?.created_at && <span>с {formatDate(user.created_at)}</span>}
+            </div>
+          </Link>
+        </div>
 
         <nav className="appNav">
           <button className="appNavLink active" type="button" onClick={() => openFolder(null)}>
@@ -1328,7 +1340,7 @@ function FilesPage() {
             <p>{totalItems} объектов</p>
           </div>
 
-          <Link className="accountPanel" to="/profile">
+          <Link className="accountPanel headerAccountPanel" to="/profile">
             <div className="profileAvatar small" aria-hidden="true">
               {profileInitial}
             </div>
