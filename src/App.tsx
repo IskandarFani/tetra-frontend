@@ -97,6 +97,14 @@ type UploadProgress = {
   fileName: string;
 };
 
+type FilePreviewState = {
+  file: FileRecord;
+  kind: "image" | "pdf" | "text" | "details";
+  objectUrl?: string;
+  text?: string;
+  message?: string;
+};
+
 type ActionMenuState =
   | {
       kind: "file";
@@ -115,6 +123,7 @@ const ACCESS_TOKEN_KEY = "accessToken";
 const REFRESH_TOKEN_KEY = "refreshToken";
 const ROOT_CRUMB: BreadcrumbItem = { id: null, name: "Мои файлы" };
 const MAX_PREVIEW_SIZE = 8 * 1024 * 1024;
+const MAX_TEXT_PREVIEW_SIZE = 2 * 1024 * 1024;
 
 class AuthError extends Error {}
 
@@ -340,6 +349,17 @@ async function createFileObjectUrl(file: FileRecord) {
   return URL.createObjectURL(blob);
 }
 
+async function fetchFileBlob(file: FileRecord) {
+  const response = await fetchWithAuth(`/api/api/files/${file.id}`);
+
+  if (!response.ok) {
+    const data = await readResponse<ApiMessageResponse>(response);
+    throw new Error(getErrorMessage(data, "Не удалось открыть файл"));
+  }
+
+  return response.blob();
+}
+
 function normalizeFolderContent(data: FolderContentResponse) {
   const breadcrumbs = data.breadcrumbs?.length ? data.breadcrumbs : [ROOT_CRUMB];
   const normalizedBreadcrumbs = breadcrumbs.map((crumb, index) =>
@@ -393,6 +413,20 @@ function getFileName(file: FileRecord) {
   return file.original_name ?? file.originalName ?? `file-${file.id}`;
 }
 
+function getFileNameParts(file: FileRecord) {
+  const name = getFileName(file);
+  const dotIndex = name.lastIndexOf(".");
+
+  if (dotIndex <= 0 || dotIndex === name.length - 1) {
+    return { baseName: name, extension: "" };
+  }
+
+  return {
+    baseName: name.slice(0, dotIndex),
+    extension: name.slice(dotIndex),
+  };
+}
+
 function getFileMimeType(file: FileRecord) {
   return file.mime_type ?? file.mimeType ?? "Файл";
 }
@@ -421,7 +455,7 @@ function getFileKind(file: FileRecord) {
     return "archive";
   }
 
-  if (mime.includes("text") || /\.(txt|md|csv|json|log)$/.test(name)) {
+  if (mime.includes("text") || /\.(txt|md|csv|json|log|bsl|html?|css|js|jsx|ts|tsx|go|sql|xml|ya?ml|toml|ini|env)$/.test(name)) {
     return "text";
   }
 
@@ -731,7 +765,8 @@ function FilesPage() {
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [actionMenu, setActionMenu] = useState<ActionMenuState | null>(null);
-  const [previewFile, setPreviewFile] = useState<FileRecord | null>(null);
+  const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
+  const [previewLoadingFileID, setPreviewLoadingFileID] = useState<string | number | null>(null);
 
   const totalItems = folders.length + files.length;
   const profileInitial = user?.email?.trim().charAt(0).toUpperCase() ?? "T";
@@ -773,8 +808,6 @@ function FilesPage() {
 
   const sortLabel =
     sortMode === "name-asc" ? "По имени" : sortMode === "size-desc" ? "По размеру" : "Сначала новые";
-
-  const previewUrl = previewFile ? previewUrls[String(previewFile.id)] : undefined;
 
   useEffect(() => {
     if (!hasSavedAccessToken()) {
@@ -925,7 +958,45 @@ function FilesPage() {
     return () => window.clearTimeout(timeoutID);
   }, [successMessage]);
 
+  useEffect(() => {
+    if (!actionMenu) {
+      return;
+    }
+
+    function closeMenu() {
+      setActionMenu(null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    }
+
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [actionMenu]);
+
+  useEffect(() => {
+    return () => {
+      if (filePreview?.objectUrl) {
+        URL.revokeObjectURL(filePreview.objectUrl);
+      }
+    };
+  }, [filePreview]);
+
   function openFolder(id: string | number | null) {
+    setActionMenu(null);
+
     if (id === null) {
       setSearchParams({});
       return;
@@ -1099,13 +1170,56 @@ function FilesPage() {
     }
   }
 
-  function handleOpenFile(file: FileRecord) {
-    if (previewUrls[String(file.id)]) {
-      setPreviewFile(file);
+  async function handleOpenFile(file: FileRecord) {
+    const kind = getFileKind(file);
+    setActionMenu(null);
+    setErrorMessage("");
+
+    if (kind === "image" && previewUrls[String(file.id)]) {
+      setFilePreview({ file, kind: "image", objectUrl: previewUrls[String(file.id)] });
       return;
     }
 
-    void handleDownload(file);
+    if (kind === "pdf") {
+      setPreviewLoadingFileID(file.id);
+      try {
+        const blob = await fetchFileBlob(file);
+        setFilePreview({ file, kind: "pdf", objectUrl: URL.createObjectURL(blob) });
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Не удалось открыть PDF");
+      } finally {
+        setPreviewLoadingFileID(null);
+      }
+      return;
+    }
+
+    if (kind === "text") {
+      if ((file.size ?? 0) > MAX_TEXT_PREVIEW_SIZE) {
+        setFilePreview({
+          file,
+          kind: "details",
+          message: "Файл слишком большой для безопасного предпросмотра. Его можно скачать.",
+        });
+        return;
+      }
+
+      setPreviewLoadingFileID(file.id);
+      try {
+        const blob = await fetchFileBlob(file);
+        setFilePreview({ file, kind: "text", text: await blob.text() });
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Не удалось открыть текстовый файл");
+      } finally {
+        setPreviewLoadingFileID(null);
+      }
+      return;
+    }
+
+    setFilePreview({
+      file,
+      kind: "details",
+      message: "Для этого типа файла пока доступно скачивание.",
+    });
   }
 
   function requestDeleteFile(file: FileRecord) {
@@ -1227,13 +1341,13 @@ function FilesPage() {
 
         <div className="workspaceToolbar">
           <div className="toolbarGroup">
-            <button className="toolbarButton primaryTool" type="button" onClick={() => setIsCreatingFolder(true)}>
+            <button className="toolbarButton folderTool" type="button" onClick={() => setIsCreatingFolder(true)}>
               <span>+</span>
               Папка
             </button>
 
             <div className="uploadControl">
-              <label className={`toolbarButton uploadPicker ${isUploading ? "disabled" : ""}`}>
+              <label className={`toolbarButton uploadPicker primaryTool ${isUploading ? "disabled" : ""}`}>
                 <span>⇧</span>
                 {isUploading ? "Загружаю..." : selectedFiles.length > 0 ? selectedFilesLabel : "Загрузить файлы"}
                 <input disabled={isUploading} multiple type="file" onChange={handleFileSelection} />
@@ -1268,6 +1382,7 @@ function FilesPage() {
                       onClick={() => {
                         setSortMode(value as SortMode);
                         setIsSortMenuOpen(false);
+                        setActionMenu(null);
                       }}
                     >
                       {label}
@@ -1281,14 +1396,20 @@ function FilesPage() {
               <button
                 className={viewMode === "grid" ? "active" : ""}
                 type="button"
-                onClick={() => setViewMode("grid")}
+                onClick={() => {
+                  setViewMode("grid");
+                  setActionMenu(null);
+                }}
               >
                 Плитка
               </button>
               <button
                 className={viewMode === "list" ? "active" : ""}
                 type="button"
-                onClick={() => setViewMode("list")}
+                onClick={() => {
+                  setViewMode("list");
+                  setActionMenu(null);
+                }}
               >
                 Список
               </button>
@@ -1328,12 +1449,12 @@ function FilesPage() {
               <h2>Папка пуста</h2>
               <p>Перетащите файлы сюда, загрузите их через кнопку или создайте папку для будущего порядка.</p>
               <div className="emptyActions">
-                <label className={`toolbarButton uploadPicker ${isUploading ? "disabled" : ""}`}>
+                <label className={`toolbarButton uploadPicker primaryTool ${isUploading ? "disabled" : ""}`}>
                   <span>⇧</span>
                   {isUploading ? "Загружаю..." : "Загрузить файлы"}
                   <input disabled={isUploading} multiple type="file" onChange={handleFileSelection} />
                 </label>
-                <button className="toolbarButton primaryTool" type="button" onClick={() => setIsCreatingFolder(true)}>
+                <button className="toolbarButton folderTool" type="button" onClick={() => setIsCreatingFolder(true)}>
                   <span>+</span>
                   Папка
                 </button>
@@ -1375,13 +1496,14 @@ function FilesPage() {
                           <button
                             type="button"
                             title="Действия"
-                            onClick={(event) =>
+                            onClick={(event) => {
+                              event.stopPropagation();
                               setActionMenu((currentMenu) =>
                                 currentMenu?.kind === "folder" && currentMenu.item.id === folder.id
                                   ? null
                                   : { kind: "folder", item: folder, x: event.clientX, y: event.clientY },
-                              )
-                            }
+                              );
+                            }}
                           >
                             ...
                           </button>
@@ -1412,14 +1534,18 @@ function FilesPage() {
                     {sortedFiles.map((file) => {
                       const kind = getFileKind(file);
                       const filePreviewUrl = previewUrls[String(file.id)];
+                      const { baseName, extension } = getFileNameParts(file);
 
                       return (
                         <article className={`fsItem fileItem ${kind}`} key={`file-${file.id}`}>
-                          <button className="itemOpenButton" type="button" onClick={() => handleOpenFile(file)}>
+                          <button className="itemOpenButton" type="button" onClick={() => void handleOpenFile(file)}>
                             <span className="itemIcon fileIcon">
                               {filePreviewUrl ? <img src={filePreviewUrl} alt="" /> : <IconFile kind={kind} />}
                             </span>
-                            <span className="itemName">{getFileName(file)}</span>
+                            <span className="itemName" title={getFileName(file)}>
+                              <span className="fileBaseName">{baseName}</span>
+                              {extension && <span className="fileExtension">{extension}</span>}
+                            </span>
                             <span className="itemMeta">
                               <span className="itemSize">{formatFileSize(file.size)}</span>
                               <span className="itemDate">{formatDate(getFileCreatedAt(file))}</span>
@@ -1430,13 +1556,14 @@ function FilesPage() {
                             <button
                               type="button"
                               title="Действия"
-                              onClick={(event) =>
+                              onClick={(event) => {
+                                event.stopPropagation();
                                 setActionMenu((currentMenu) =>
                                   currentMenu?.kind === "file" && currentMenu.item.id === file.id
                                     ? null
                                     : { kind: "file", item: file, x: event.clientX, y: event.clientY },
-                                )
-                              }
+                                );
+                              }}
                             >
                               ...
                             </button>
@@ -1453,7 +1580,11 @@ function FilesPage() {
       </section>
 
       {actionMenu && (
-        <div className="floatingActionMenu" style={{ left: actionMenu.x, top: actionMenu.y }}>
+        <div
+          className="floatingActionMenu"
+          style={{ left: actionMenu.x, top: actionMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
           {actionMenu.kind === "folder" ? (
             <>
               <button
@@ -1472,17 +1603,13 @@ function FilesPage() {
             </>
           ) : (
             <>
-              {previewUrls[String(actionMenu.item.id)] && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPreviewFile(actionMenu.item);
-                    setActionMenu(null);
-                  }}
-                >
-                  Открыть
-                </button>
-              )}
+              <button
+                type="button"
+                disabled={previewLoadingFileID === actionMenu.item.id}
+                onClick={() => void handleOpenFile(actionMenu.item)}
+              >
+                {previewLoadingFileID === actionMenu.item.id ? "Открываю..." : "Открыть"}
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -1544,19 +1671,32 @@ function FilesPage() {
         </Modal>
       )}
 
-      {previewFile && previewUrl && (
-        <Modal title={getFileName(previewFile)} onClose={() => setPreviewFile(null)}>
-          <div className="previewDialog">
-            <img src={previewUrl} alt={getFileName(previewFile)} />
+      {filePreview && (
+        <Modal title={getFileName(filePreview.file)} onClose={() => setFilePreview(null)}>
+          <div className={`previewDialog ${filePreview.kind}`}>
+            {filePreview.kind === "image" && filePreview.objectUrl && (
+              <img src={filePreview.objectUrl} alt={getFileName(filePreview.file)} />
+            )}
+            {filePreview.kind === "pdf" && filePreview.objectUrl && (
+              <iframe className="pdfPreview" src={filePreview.objectUrl} title={getFileName(filePreview.file)} />
+            )}
+            {filePreview.kind === "text" && <pre className="textPreview">{filePreview.text}</pre>}
+            {filePreview.kind === "details" && (
+              <div className="detailsPreview">
+                <IconFile kind={getFileKind(filePreview.file)} />
+                <p>{filePreview.message}</p>
+              </div>
+            )}
             <div className="previewMeta">
-              <span>{formatFileSize(previewFile.size)}</span>
-              <span>{formatDate(getFileCreatedAt(previewFile))}</span>
+              <span>{formatFileSize(filePreview.file.size)}</span>
+              <span>{formatDate(getFileCreatedAt(filePreview.file))}</span>
+              <span>{getFileMimeType(filePreview.file)}</span>
             </div>
             <div className="modalActions">
-              <button className="ghostButton" type="button" onClick={() => void handleDownload(previewFile)}>
+              <button className="ghostButton" type="button" onClick={() => void handleDownload(filePreview.file)}>
                 Скачать
               </button>
-              <button className="primaryButton" type="button" onClick={() => setPreviewFile(null)}>
+              <button className="primaryButton" type="button" onClick={() => setFilePreview(null)}>
                 Закрыть
               </button>
             </div>
