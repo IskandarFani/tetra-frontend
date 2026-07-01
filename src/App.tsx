@@ -826,6 +826,7 @@ function FilesPage() {
 
   const sortLabel =
     sortMode === "name-asc" ? "По имени" : sortMode === "size-desc" ? "По размеру" : "Сначала новые";
+  const shouldShowListPreview = viewMode === "list" && sortedFiles.length > 0;
 
   useEffect(() => {
     if (!hasSavedAccessToken()) {
@@ -1595,7 +1596,7 @@ function FilesPage() {
               </div>
             </div>
           ) : (
-            <div className={`contentSections ${viewMode === "list" ? "listView withPreviewPane" : ""}`}>
+            <div className={`contentSections ${viewMode === "list" ? "listView" : ""} ${shouldShowListPreview ? "withPreviewPane" : ""}`}>
               <div className="contentMainColumn">
                 {sortedFolders.length > 0 && (
                 <section className="contentGroup">
@@ -1735,7 +1736,7 @@ function FilesPage() {
                 )}
               </div>
 
-              {viewMode === "list" && (
+              {shouldShowListPreview && (
                 <aside className="listPreviewPane" aria-label="Предпросмотр файла">
                   {selectedPreviewFile ? (
                     <>
