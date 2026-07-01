@@ -108,6 +108,13 @@ type FilePreviewState = {
   message?: string;
 };
 
+type InlinePreviewState = {
+  kind: "empty" | "loading" | "image" | "pdf" | "text" | "details";
+  objectUrl?: string;
+  text?: string;
+  message?: string;
+};
+
 type ActionMenuState =
   | {
       kind: "file";
@@ -782,6 +789,7 @@ function FilesPage() {
   const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
   const [previewLoadingFileID, setPreviewLoadingFileID] = useState<string | number | null>(null);
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<FileRecord | null>(null);
+  const [inlinePreview, setInlinePreview] = useState<InlinePreviewState>({ kind: "empty" });
   const [dropTargetFolderID, setDropTargetFolderID] = useState<string | number | null>(null);
   const [movingFileID, setMovingFileID] = useState<string | number | null>(null);
 
@@ -986,6 +994,89 @@ function FilesPage() {
       return files.some((file) => String(file.id) === String(currentFile.id)) ? currentFile : null;
     });
   }, [files]);
+
+  useEffect(() => {
+    if (!selectedPreviewFile || viewMode !== "list") {
+      setInlinePreview({ kind: "empty" });
+      return;
+    }
+
+    const previewFile = selectedPreviewFile;
+    const kind = getFileKind(previewFile);
+    const cachedImageUrl = previewUrls[String(previewFile.id)];
+    let ignore = false;
+    let objectUrlToRevoke: string | null = null;
+
+    if (kind === "image" && cachedImageUrl) {
+      setInlinePreview({ kind: "image", objectUrl: cachedImageUrl });
+      return;
+    }
+
+    async function loadInlinePreview() {
+      setInlinePreview({ kind: "loading" });
+
+      try {
+        if (kind === "image" || kind === "pdf") {
+          const blob = await fetchFileBlob(previewFile);
+          const objectUrl = URL.createObjectURL(blob);
+          objectUrlToRevoke = objectUrl;
+
+          if (ignore) {
+            URL.revokeObjectURL(objectUrl);
+            objectUrlToRevoke = null;
+            return;
+          }
+
+          if (!ignore) {
+            setInlinePreview({ kind, objectUrl });
+          }
+
+          return;
+        }
+
+        if (kind === "text") {
+          if ((previewFile.size ?? 0) > MAX_TEXT_PREVIEW_SIZE) {
+            setInlinePreview({
+              kind: "details",
+              message: "Текстовый файл слишком большой для быстрого предпросмотра. Его можно открыть отдельно или скачать.",
+            });
+            return;
+          }
+
+          const blob = await fetchFileBlob(previewFile);
+          const text = await blob.text();
+
+          if (!ignore) {
+            setInlinePreview({ kind: "text", text });
+          }
+
+          return;
+        }
+
+        setInlinePreview({
+          kind: "details",
+          message: "Для этого типа файла пока доступно открытие в отдельном окне предпросмотра или скачивание.",
+        });
+      } catch (error) {
+        if (!ignore) {
+          setInlinePreview({
+            kind: "details",
+            message: error instanceof Error ? error.message : "Не удалось загрузить предпросмотр.",
+          });
+        }
+      }
+    }
+
+    void loadInlinePreview();
+
+    return () => {
+      ignore = true;
+
+      if (objectUrlToRevoke) {
+        URL.revokeObjectURL(objectUrlToRevoke);
+      }
+    };
+  }, [previewUrls, selectedPreviewFile, viewMode]);
 
   useEffect(() => {
     if (!actionMenu) {
@@ -1741,15 +1832,24 @@ function FilesPage() {
                   {selectedPreviewFile ? (
                     <>
                       <div className={`listPreviewMedia ${getFileKind(selectedPreviewFile)}`}>
-                        {previewUrls[String(selectedPreviewFile.id)] ? (
-                          <img src={previewUrls[String(selectedPreviewFile.id)]} alt={getFileName(selectedPreviewFile)} />
-                        ) : (
+                        {inlinePreview.kind === "loading" && <span className="listPreviewLoader">Загружаем предпросмотр...</span>}
+                        {inlinePreview.kind === "image" && inlinePreview.objectUrl && (
+                          <img src={inlinePreview.objectUrl} alt={getFileName(selectedPreviewFile)} />
+                        )}
+                        {inlinePreview.kind === "pdf" && inlinePreview.objectUrl && (
+                          <iframe src={inlinePreview.objectUrl} title={getFileName(selectedPreviewFile)} />
+                        )}
+                        {inlinePreview.kind === "text" && (
+                          <pre>{inlinePreview.text || "Файл пуст"}</pre>
+                        )}
+                        {(inlinePreview.kind === "empty" || inlinePreview.kind === "details") && (
                           <IconFile kind={getFileKind(selectedPreviewFile)} />
                         )}
                       </div>
                       <div className="listPreviewInfo">
                         <span className="listPreviewKicker">{getFileMimeType(selectedPreviewFile)}</span>
                         <h2>{getFileName(selectedPreviewFile)}</h2>
+                        {inlinePreview.kind === "details" && inlinePreview.message && <p>{inlinePreview.message}</p>}
                         <dl>
                           <div>
                             <dt>Размер</dt>

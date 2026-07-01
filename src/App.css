@@ -1275,6 +1275,11 @@ button:disabled {
   gap: 8px;
 }
 
+.listView.withPreviewPane {
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 20px;
+}
+
 .listView .itemGrid {
   grid-template-columns: 1fr;
   gap: 8px;
@@ -1399,9 +1404,36 @@ button:disabled {
   object-fit: contain;
 }
 
+.listPreviewMedia iframe {
+  width: 100%;
+  height: 280px;
+  border: 0;
+  background: #ffffff;
+}
+
+.listPreviewMedia pre {
+  width: 100%;
+  max-height: 280px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  color: #dbeafe;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .listPreviewMedia svg {
   width: 86px;
   height: 86px;
+}
+
+.listPreviewLoader {
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 720;
 }
 
 .listPreviewInfo {
@@ -1423,6 +1455,13 @@ button:disabled {
   font-size: 18px;
   line-height: 1.25;
   overflow-wrap: anywhere;
+}
+
+.listPreviewInfo p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .listPreviewInfo dl {
@@ -2142,6 +2181,10 @@ button:disabled {
   }
 
   .withPreviewPane {
+    grid-template-columns: 1fr;
+  }
+
+  .listView.withPreviewPane {
     grid-template-columns: 1fr;
   }
 
