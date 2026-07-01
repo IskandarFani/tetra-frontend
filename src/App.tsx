@@ -40,6 +40,8 @@ type FileRecord = {
   size?: number;
   created_at?: string;
   createdAt?: string;
+  folder_id?: string | number | null;
+  folderId?: string | number | null;
 };
 
 type FolderRecord = {
@@ -316,6 +318,17 @@ async function deleteFile(fileID: string | number) {
     method: "DELETE",
   });
   const data = await readResponse<ApiMessageResponse>(response);
+
+  return { response, data };
+}
+
+async function moveFile(fileID: string | number, folderID: string | number | null) {
+  const response = await fetchWithAuth(`/api/api/files/${fileID}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder_id: folderID === null ? null : Number(folderID) }),
+  });
+  const data = await readResponse<FileActionResponse>(response);
 
   return { response, data };
 }
@@ -768,10 +781,14 @@ function FilesPage() {
   const [actionMenu, setActionMenu] = useState<ActionMenuState | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
   const [previewLoadingFileID, setPreviewLoadingFileID] = useState<string | number | null>(null);
+  const [selectedPreviewFile, setSelectedPreviewFile] = useState<FileRecord | null>(null);
+  const [dropTargetFolderID, setDropTargetFolderID] = useState<string | number | null>(null);
+  const [movingFileID, setMovingFileID] = useState<string | number | null>(null);
 
   const totalItems = folders.length + files.length;
   const profileInitial = user?.email?.trim().charAt(0).toUpperCase() ?? "T";
   const pageTitle = currentFolder?.name ?? "Мои файлы";
+  const parentCrumb = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : null;
 
   const selectedFilesLabel = useMemo(() => {
     if (selectedFiles.length === 0) {
@@ -960,6 +977,16 @@ function FilesPage() {
   }, [successMessage]);
 
   useEffect(() => {
+    setSelectedPreviewFile((currentFile) => {
+      if (!currentFile) {
+        return null;
+      }
+
+      return files.some((file) => String(file.id) === String(currentFile.id)) ? currentFile : null;
+    });
+  }, [files]);
+
+  useEffect(() => {
     if (!actionMenu) {
       return;
     }
@@ -997,6 +1024,7 @@ function FilesPage() {
 
   function openFolder(id: string | number | null) {
     setActionMenu(null);
+    setSelectedPreviewFile(null);
 
     if (id === null) {
       setSearchParams({});
@@ -1100,7 +1128,62 @@ function FilesPage() {
     }
   }
 
+  function isInternalFileDrag(event: DragEvent<HTMLElement>) {
+    return Array.from(event.dataTransfer.types).includes("application/x-tetra-file-id");
+  }
+
+  function handleFileDragStart(event: DragEvent<HTMLElement>, file: FileRecord) {
+    setActionMenu(null);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-tetra-file-id", String(file.id));
+    event.dataTransfer.setData("text/plain", getFileName(file));
+  }
+
+  function handleFileDragEnd() {
+    setDropTargetFolderID(null);
+  }
+
+  function handleFolderDragOver(event: DragEvent<HTMLElement>, folder: FolderRecord) {
+    if (!isInternalFileDrag(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setIsDragActive(false);
+    setDropTargetFolderID(folder.id);
+  }
+
+  function handleFolderDragLeave(event: DragEvent<HTMLElement>, folder: FolderRecord) {
+    if (event.currentTarget === event.target && String(dropTargetFolderID) === String(folder.id)) {
+      setDropTargetFolderID(null);
+    }
+  }
+
+  async function handleFolderDrop(event: DragEvent<HTMLElement>, folder: FolderRecord) {
+    if (!isInternalFileDrag(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setDropTargetFolderID(null);
+
+    const fileID = event.dataTransfer.getData("application/x-tetra-file-id");
+
+    if (!fileID) {
+      return;
+    }
+
+    await moveFileToFolder(fileID, folder.id);
+  }
+
   function handleDragOver(event: DragEvent<HTMLElement>) {
+    if (isInternalFileDrag(event) || !Array.from(event.dataTransfer.types).includes("Files")) {
+      return;
+    }
+
     event.preventDefault();
     setIsDragActive(true);
   }
@@ -1112,6 +1195,11 @@ function FilesPage() {
   }
 
   function handleDrop(event: DragEvent<HTMLElement>) {
+    if (isInternalFileDrag(event)) {
+      setIsDragActive(false);
+      return;
+    }
+
     event.preventDefault();
     setIsDragActive(false);
 
@@ -1120,6 +1208,29 @@ function FilesPage() {
     if (droppedFiles.length > 0) {
       setSelectedFiles(droppedFiles);
       void uploadFiles(droppedFiles);
+    }
+  }
+
+  async function moveFileToFolder(fileID: string | number, targetFolderID: string | number | null) {
+    setMovingFileID(fileID);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const { response, data } = await moveFile(fileID, targetFolderID);
+
+      if (!response.ok) {
+        setErrorMessage(getErrorMessage(data, "Не удалось переместить файл"));
+        return;
+      }
+
+      setSelectedPreviewFile((currentFile) => (currentFile && String(currentFile.id) === String(fileID) ? null : currentFile));
+      await reloadCurrentFolder();
+      setSuccessMessage("Файл перемещён");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Не удалось переместить файл");
+    } finally {
+      setMovingFileID(null);
     }
   }
 
@@ -1324,18 +1435,27 @@ function FilesPage() {
       <section className="appWorkspace">
         <header className="appHeader">
           <div className="headerTitle">
-            <div className="breadcrumbs" aria-label="Путь">
-              {breadcrumbs.map((crumb, index) => (
-                <button
-                  className="breadcrumbButton"
-                  key={`${crumb.id ?? "root"}-${index}`}
-                  type="button"
-                  onClick={() => openFolder(crumb.id)}
-                >
-                  {index > 0 && <span className="breadcrumbSep">/</span>}
-                  <span>{crumb.name}</span>
+            <div className="folderNavLine">
+              {parentCrumb && (
+                <button className="backFolderButton" type="button" onClick={() => openFolder(parentCrumb.id)}>
+                  <span aria-hidden="true">←</span>
+                  Назад
                 </button>
-              ))}
+              )}
+
+              <div className="breadcrumbs" aria-label="Путь">
+                {breadcrumbs.map((crumb, index) => (
+                  <button
+                    className={`breadcrumbButton ${index === breadcrumbs.length - 1 ? "current" : ""}`}
+                    key={`${crumb.id ?? "root"}-${index}`}
+                    type="button"
+                    onClick={() => openFolder(crumb.id)}
+                  >
+                    {index > 0 && <span className="breadcrumbSep">/</span>}
+                    <span>{crumb.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
             <h1>{pageTitle}</h1>
             <p>{totalItems} объектов</p>
@@ -1412,6 +1532,7 @@ function FilesPage() {
                 onClick={() => {
                   setViewMode("grid");
                   setActionMenu(null);
+                  setSelectedPreviewFile(null);
                 }}
               >
                 Плитка
@@ -1474,8 +1595,9 @@ function FilesPage() {
               </div>
             </div>
           ) : (
-            <div className={`contentSections ${viewMode === "list" ? "listView" : ""}`}>
-              {sortedFolders.length > 0 && (
+            <div className={`contentSections ${viewMode === "list" ? "listView withPreviewPane" : ""}`}>
+              <div className="contentMainColumn">
+                {sortedFolders.length > 0 && (
                 <section className="contentGroup">
                   <div className="contentGroupHeader">
                     <h2>Папки</h2>
@@ -1493,7 +1615,13 @@ function FilesPage() {
                     )}
 
                     {sortedFolders.map((folder) => (
-                      <article className="fsItem folderItem" key={`folder-${folder.id}`}>
+                      <article
+                        className={`fsItem folderItem ${String(dropTargetFolderID) === String(folder.id) ? "dropTarget" : ""}`}
+                        key={`folder-${folder.id}`}
+                        onDragLeave={(event) => handleFolderDragLeave(event, folder)}
+                        onDragOver={(event) => handleFolderDragOver(event, folder)}
+                        onDrop={(event) => void handleFolderDrop(event, folder)}
+                      >
                         <button className="itemOpenButton" type="button" onClick={() => openFolder(folder.id)}>
                           <span className="itemIcon folderIcon">
                             <IconFolder />
@@ -1527,7 +1655,7 @@ function FilesPage() {
                 </section>
               )}
 
-              {sortedFiles.length > 0 && (
+                {sortedFiles.length > 0 && (
                 <section className="contentGroup">
                   <div className="contentGroupHeader">
                     <h2>Файлы</h2>
@@ -1550,8 +1678,26 @@ function FilesPage() {
                       const { baseName, extension } = getFileNameParts(file);
 
                       return (
-                        <article className={`fsItem fileItem ${kind}`} key={`file-${file.id}`}>
-                          <button className="itemOpenButton" type="button" onClick={() => void handleOpenFile(file)}>
+                        <article
+                          className={`fsItem fileItem ${kind} ${selectedPreviewFile && String(selectedPreviewFile.id) === String(file.id) ? "selected" : ""} ${String(movingFileID) === String(file.id) ? "moving" : ""}`}
+                          draggable
+                          key={`file-${file.id}`}
+                          onDragEnd={handleFileDragEnd}
+                          onDragStart={(event) => handleFileDragStart(event, file)}
+                        >
+                          <button
+                            className="itemOpenButton"
+                            type="button"
+                            onClick={() => {
+                              if (viewMode === "list") {
+                                setSelectedPreviewFile(file);
+                                return;
+                              }
+
+                              void handleOpenFile(file);
+                            }}
+                            onDoubleClick={() => void handleOpenFile(file)}
+                          >
                             <span className="itemIcon fileIcon">
                               {filePreviewUrl ? <img src={filePreviewUrl} alt="" /> : <IconFile kind={kind} />}
                             </span>
@@ -1586,6 +1732,51 @@ function FilesPage() {
                     })}
                   </div>
                 </section>
+                )}
+              </div>
+
+              {viewMode === "list" && (
+                <aside className="listPreviewPane" aria-label="Предпросмотр файла">
+                  {selectedPreviewFile ? (
+                    <>
+                      <div className={`listPreviewMedia ${getFileKind(selectedPreviewFile)}`}>
+                        {previewUrls[String(selectedPreviewFile.id)] ? (
+                          <img src={previewUrls[String(selectedPreviewFile.id)]} alt={getFileName(selectedPreviewFile)} />
+                        ) : (
+                          <IconFile kind={getFileKind(selectedPreviewFile)} />
+                        )}
+                      </div>
+                      <div className="listPreviewInfo">
+                        <span className="listPreviewKicker">{getFileMimeType(selectedPreviewFile)}</span>
+                        <h2>{getFileName(selectedPreviewFile)}</h2>
+                        <dl>
+                          <div>
+                            <dt>Размер</dt>
+                            <dd>{formatFileSize(selectedPreviewFile.size)}</dd>
+                          </div>
+                          <div>
+                            <dt>Добавлен</dt>
+                            <dd>{formatDate(getFileCreatedAt(selectedPreviewFile))}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                      <div className="listPreviewActions">
+                        <button type="button" onClick={() => void handleOpenFile(selectedPreviewFile)}>
+                          Открыть
+                        </button>
+                        <button type="button" onClick={() => void handleDownload(selectedPreviewFile)}>
+                          Скачать
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="listPreviewEmpty">
+                      <IconFile kind="file" />
+                      <h2>Выберите файл</h2>
+                      <p>В списке справа появится краткий предпросмотр, размер и дата добавления.</p>
+                    </div>
+                  )}
+                </aside>
               )}
             </div>
           )}

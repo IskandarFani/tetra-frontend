@@ -637,12 +637,42 @@ button:disabled {
   color: #94a3b8;
 }
 
+.folderNavLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.backFolderButton {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.1);
+  color: #fde68a;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.backFolderButton:hover {
+  border-color: rgba(251, 191, 36, 0.58);
+  background: rgba(251, 191, 36, 0.16);
+}
+
 .breadcrumbs {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   min-height: 30px;
   align-items: center;
+  padding: 4px 10px;
+  border: 1px solid rgba(251, 191, 36, 0.22);
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.07);
 }
 
 .breadcrumbButton {
@@ -651,19 +681,28 @@ button:disabled {
   align-items: center;
   border: 0;
   background: transparent;
-  color: #93c5fd;
+  color: #fde68a;
   font-size: 14px;
   font-weight: 800;
   cursor: pointer;
   padding: 0;
 }
 
+.breadcrumbButton.current {
+  color: #ffffff;
+  cursor: default;
+}
+
 .breadcrumbButton:hover span:last-child {
   text-decoration: underline;
 }
 
+.breadcrumbButton.current:hover span:last-child {
+  text-decoration: none;
+}
+
 .breadcrumbSep {
-  color: #64748b;
+  color: rgba(251, 191, 36, 0.52);
   padding: 0 4px;
 }
 
@@ -974,6 +1013,17 @@ button:disabled {
   gap: 20px;
 }
 
+.contentMainColumn {
+  min-width: 0;
+  display: grid;
+  gap: 20px;
+}
+
+.withPreviewPane {
+  grid-template-columns: minmax(0, 1fr) 340px;
+  align-items: start;
+}
+
 .contentGroup {
   display: grid;
   gap: 10px;
@@ -1028,6 +1078,21 @@ button:disabled {
   border-color: rgba(251, 191, 36, 0.42);
   background: rgba(15, 23, 42, 0.78);
   transform: translateY(-1px);
+}
+
+.fsItem.selected,
+.fsItem.dropTarget {
+  border-color: rgba(251, 191, 36, 0.72);
+  background: rgba(251, 191, 36, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.18);
+}
+
+.fsItem.moving {
+  opacity: 0.46;
+}
+
+.folderItem.dropTarget {
+  transform: translateY(-2px);
 }
 
 .itemOpenButton {
@@ -1302,6 +1367,130 @@ button:disabled {
   border-left: 1px solid rgba(148, 163, 184, 0.12);
   opacity: 0.62;
   transform: translateX(0);
+}
+
+.listPreviewPane {
+  position: sticky;
+  top: 18px;
+  min-height: 360px;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.36);
+}
+
+.listPreviewMedia {
+  min-height: 200px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.72);
+  overflow: hidden;
+}
+
+.listPreviewMedia img {
+  width: 100%;
+  max-height: 240px;
+  display: block;
+  object-fit: contain;
+}
+
+.listPreviewMedia svg {
+  width: 86px;
+  height: 86px;
+}
+
+.listPreviewInfo {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.listPreviewKicker {
+  color: #93c5fd;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.listPreviewInfo h2,
+.listPreviewEmpty h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 18px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.listPreviewInfo dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.listPreviewInfo dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #bfdbfe;
+  font-size: 13px;
+}
+
+.listPreviewInfo dt {
+  color: #64748b;
+  font-weight: 760;
+}
+
+.listPreviewInfo dd {
+  margin: 0;
+  text-align: right;
+}
+
+.listPreviewActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.listPreviewActions button {
+  min-height: 38px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #dbeafe;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.listPreviewActions button:hover {
+  border-color: rgba(251, 191, 36, 0.5);
+}
+
+.listPreviewEmpty {
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.listPreviewEmpty svg {
+  width: 72px;
+  height: 72px;
+  opacity: 0.62;
+}
+
+.listPreviewEmpty p {
+  margin: 0;
+  max-width: 240px;
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .actionMenuLayer {
@@ -1852,6 +2041,8 @@ button:disabled {
 
   .breadcrumbs {
     min-height: 24px;
+    padding: 4px 8px;
+    border-radius: 10px;
   }
 
   .breadcrumbButton {
@@ -1944,6 +2135,18 @@ button:disabled {
 
   .contentSections {
     gap: 18px;
+  }
+
+  .contentMainColumn {
+    gap: 18px;
+  }
+
+  .withPreviewPane {
+    grid-template-columns: 1fr;
+  }
+
+  .listPreviewPane {
+    display: none;
   }
 
   .contentGroupHeader h2 {
