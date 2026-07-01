@@ -1388,7 +1388,7 @@ button:disabled {
 }
 
 .listPreviewMedia {
-  min-height: clamp(240px, 38vh, 360px);
+  min-height: clamp(280px, 44vh, 420px);
   display: grid;
   place-items: center;
   border: 1px solid rgba(148, 163, 184, 0.14);
@@ -1399,22 +1399,22 @@ button:disabled {
 
 .listPreviewMedia img {
   width: 100%;
-  max-height: clamp(240px, 38vh, 360px);
+  max-height: clamp(280px, 44vh, 420px);
   display: block;
   object-fit: contain;
 }
 
 .listPreviewMedia iframe {
   width: 100%;
-  height: clamp(260px, 42vh, 380px);
+  height: clamp(300px, 48vh, 440px);
   border: 0;
   background: #ffffff;
 }
 
 .listPreviewMedia pre {
   width: 100%;
-  min-height: clamp(240px, 38vh, 340px);
-  max-height: clamp(240px, 38vh, 340px);
+  min-height: clamp(280px, 44vh, 400px);
+  max-height: clamp(280px, 44vh, 400px);
   margin: 0;
   padding: 14px;
   overflow: auto;
@@ -1541,21 +1541,21 @@ button:disabled {
   }
 
   .listPreviewMedia {
-    min-height: clamp(220px, 34vh, 300px);
+    min-height: clamp(240px, 38vh, 340px);
   }
 
   .listPreviewMedia img,
   .listPreviewMedia iframe {
-    max-height: clamp(220px, 34vh, 300px);
+    max-height: clamp(240px, 38vh, 340px);
   }
 
   .listPreviewMedia iframe {
-    height: clamp(240px, 38vh, 320px);
+    height: clamp(260px, 42vh, 360px);
   }
 
   .listPreviewMedia pre {
-    min-height: clamp(220px, 34vh, 300px);
-    max-height: clamp(220px, 34vh, 300px);
+    min-height: clamp(240px, 38vh, 340px);
+    max-height: clamp(240px, 38vh, 340px);
   }
 }
 
