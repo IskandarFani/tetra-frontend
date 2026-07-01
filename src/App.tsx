@@ -101,6 +101,7 @@ type FilePreviewState = {
   file: FileRecord;
   kind: "image" | "pdf" | "text" | "details";
   objectUrl?: string;
+  shouldRevokeObjectUrl?: boolean;
   text?: string;
   message?: string;
 };
@@ -988,7 +989,7 @@ function FilesPage() {
 
   useEffect(() => {
     return () => {
-      if (filePreview?.objectUrl) {
+      if (filePreview?.objectUrl && filePreview.shouldRevokeObjectUrl) {
         URL.revokeObjectURL(filePreview.objectUrl);
       }
     };
@@ -1184,7 +1185,7 @@ function FilesPage() {
       setPreviewLoadingFileID(file.id);
       try {
         const blob = await fetchFileBlob(file);
-        setFilePreview({ file, kind: "pdf", objectUrl: URL.createObjectURL(blob) });
+        setFilePreview({ file, kind: "pdf", objectUrl: URL.createObjectURL(blob), shouldRevokeObjectUrl: true });
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Не удалось открыть PDF");
       } finally {
