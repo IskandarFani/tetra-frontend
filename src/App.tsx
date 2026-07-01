@@ -1592,50 +1592,52 @@ function FilesPage() {
       </section>
 
       {actionMenu && (
-        <div
-          className="floatingActionMenu"
-          style={{ left: actionMenu.x, top: actionMenu.y }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {actionMenu.kind === "folder" ? (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setRenameTarget(actionMenu.item);
-                  setRenameDraft(actionMenu.item.name);
-                  setActionMenu(null);
-                }}
-              >
-                Переименовать
-              </button>
-              <button className="dangerMenuButton" type="button" onClick={() => requestDeleteFolder(actionMenu.item)}>
-                Удалить
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                disabled={previewLoadingFileID === actionMenu.item.id}
-                onClick={() => void handleOpenFile(actionMenu.item)}
-              >
-                {previewLoadingFileID === actionMenu.item.id ? "Открываю..." : "Открыть"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleDownload(actionMenu.item);
-                  setActionMenu(null);
-                }}
-              >
-                Скачать
-              </button>
-              <button className="dangerMenuButton" type="button" onClick={() => requestDeleteFile(actionMenu.item)}>
-                Удалить
-              </button>
-            </>
-          )}
+        <div className="actionMenuLayer" onClick={() => setActionMenu(null)}>
+          <div
+            className="floatingActionMenu"
+            style={{ left: actionMenu.x, top: actionMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {actionMenu.kind === "folder" ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRenameTarget(actionMenu.item);
+                    setRenameDraft(actionMenu.item.name);
+                    setActionMenu(null);
+                  }}
+                >
+                  Переименовать
+                </button>
+                <button className="dangerMenuButton" type="button" onClick={() => requestDeleteFolder(actionMenu.item)}>
+                  Удалить
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled={previewLoadingFileID === actionMenu.item.id}
+                  onClick={() => void handleOpenFile(actionMenu.item)}
+                >
+                  {previewLoadingFileID === actionMenu.item.id ? "Открываю..." : "Открыть"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleDownload(actionMenu.item);
+                    setActionMenu(null);
+                  }}
+                >
+                  Скачать
+                </button>
+                <button className="dangerMenuButton" type="button" onClick={() => requestDeleteFile(actionMenu.item)}>
+                  Удалить
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
 

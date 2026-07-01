@@ -1304,9 +1304,15 @@ button:disabled {
   transform: translateX(0);
 }
 
+.actionMenuLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+}
+
 .floatingActionMenu {
   position: fixed;
-  z-index: 80;
   min-width: 172px;
   display: grid;
   gap: 4px;
@@ -1316,6 +1322,7 @@ button:disabled {
   background: #0f172a;
   box-shadow: 0 18px 55px rgba(0, 0, 0, 0.42);
   transform: translate(-100%, 8px);
+  pointer-events: auto;
 }
 
 .floatingActionMenu button {
@@ -2005,6 +2012,34 @@ button:disabled {
   .listView .itemActions {
     padding: 6px;
     border-left: 0;
+  }
+
+  .actionMenuLayer {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 0 12px calc(14px + env(safe-area-inset-bottom));
+    background: rgba(2, 6, 23, 0.2);
+    pointer-events: auto;
+  }
+
+  .floatingActionMenu {
+    left: auto !important;
+    top: auto !important;
+    bottom: auto;
+    width: min(100%, 420px);
+    min-width: 0;
+    padding: 8px;
+    border-radius: 16px;
+    transform: none;
+    box-shadow: 0 -18px 70px rgba(0, 0, 0, 0.48);
+  }
+
+  .floatingActionMenu button {
+    min-height: 48px;
+    border-radius: 10px;
+    padding: 0 14px;
+    font-size: 16px;
   }
 
   .emptyState,
