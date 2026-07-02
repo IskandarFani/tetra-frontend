@@ -92,6 +92,16 @@ type MobileFileDragState = {
   y: number;
 };
 
+type MobileDropTarget =
+  | {
+      kind: "folder";
+      id: string | number;
+    }
+  | {
+      kind: "parent";
+      id: string | number | null;
+    };
+
 type ConfirmDialogState =
   | {
       kind: "delete-file";
@@ -840,6 +850,7 @@ function FilesPage() {
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<FileRecord | null>(null);
   const [inlinePreview, setInlinePreview] = useState<InlinePreviewState>({ kind: "empty" });
   const [dropTargetFolderID, setDropTargetFolderID] = useState<string | number | null>(null);
+  const [isParentDropTarget, setIsParentDropTarget] = useState(false);
   const [movingFileID, setMovingFileID] = useState<string | number | null>(null);
   const [mobileFileDrag, setMobileFileDrag] = useState<MobileFileDragState | null>(null);
 
@@ -1295,6 +1306,7 @@ function FilesPage() {
 
   function handleFileDragEnd() {
     setDropTargetFolderID(null);
+    setIsParentDropTarget(false);
   }
 
   function clearMobileDragTimer() {
@@ -1342,11 +1354,20 @@ function FilesPage() {
     mobileDragAutoScrollRef.current = window.requestAnimationFrame(scrollStep);
   }
 
-  function findMobileDropTargetFolderID(x: number, y: number) {
+  function findMobileDropTarget(x: number, y: number): MobileDropTarget | null {
     const element = document.elementFromPoint(x, y);
+
+    if (element?.closest("[data-parent-folder-drop]")) {
+      return parentCrumb ? { kind: "parent", id: parentCrumb.id } : null;
+    }
+
     const folderElement = element?.closest<HTMLElement>("[data-folder-drop-id]");
 
-    return folderElement?.dataset.folderDropId ?? null;
+    if (folderElement?.dataset.folderDropId) {
+      return { kind: "folder", id: folderElement.dataset.folderDropId };
+    }
+
+    return null;
   }
 
   function resetMobileFileDrag() {
@@ -1356,6 +1377,7 @@ function FilesPage() {
     mobileDragRef.current = null;
     setMobileFileDrag(null);
     setDropTargetFolderID(null);
+    setIsParentDropTarget(false);
   }
 
   function handleMobileFilePointerDown(event: PointerEvent<HTMLElement>, file: FileRecord) {
@@ -1414,8 +1436,10 @@ function FilesPage() {
 
     event.preventDefault();
     mobileDragLastYRef.current = event.clientY;
+    const dropTarget = findMobileDropTarget(event.clientX, event.clientY);
     setMobileFileDrag({ file: drag.file, x: event.clientX, y: event.clientY });
-    setDropTargetFolderID(findMobileDropTargetFolderID(event.clientX, event.clientY));
+    setDropTargetFolderID(dropTarget?.kind === "folder" ? dropTarget.id : null);
+    setIsParentDropTarget(dropTarget?.kind === "parent");
   }
 
   function handleMobileFilePointerUp(event: PointerEvent<HTMLElement>) {
@@ -1425,7 +1449,7 @@ function FilesPage() {
       return;
     }
 
-    const targetFolderID = drag.isActive ? findMobileDropTargetFolderID(event.clientX, event.clientY) : null;
+    const dropTarget = drag.isActive ? findMobileDropTarget(event.clientX, event.clientY) : null;
 
     if (drag.isActive) {
       event.preventDefault();
@@ -1438,8 +1462,8 @@ function FilesPage() {
 
     resetMobileFileDrag();
 
-    if (targetFolderID !== null) {
-      void moveFileToFolder(drag.file.id, targetFolderID);
+    if (dropTarget) {
+      void moveFileToFolder(drag.file.id, dropTarget.id);
     }
   }
 
@@ -1485,6 +1509,43 @@ function FilesPage() {
     await moveFileToFolder(fileID, folder.id);
   }
 
+  function handleParentFolderDragOver(event: DragEvent<HTMLElement>) {
+    if (!parentCrumb || !isInternalFileDrag(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setIsDragActive(false);
+    setDropTargetFolderID(null);
+    setIsParentDropTarget(true);
+  }
+
+  function handleParentFolderDragLeave(event: DragEvent<HTMLElement>) {
+    if (event.currentTarget === event.target) {
+      setIsParentDropTarget(false);
+    }
+  }
+
+  async function handleParentFolderDrop(event: DragEvent<HTMLElement>) {
+    if (!parentCrumb || !isInternalFileDrag(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setIsParentDropTarget(false);
+
+    const fileID = event.dataTransfer.getData("application/x-tetra-file-id");
+
+    if (!fileID) {
+      return;
+    }
+
+    await moveFileToFolder(fileID, parentCrumb.id);
+  }
+
   function handleDragOver(event: DragEvent<HTMLElement>) {
     if (isInternalFileDrag(event) || !Array.from(event.dataTransfer.types).includes("Files")) {
       return;
@@ -1503,11 +1564,13 @@ function FilesPage() {
   function handleDrop(event: DragEvent<HTMLElement>) {
     if (isInternalFileDrag(event)) {
       setIsDragActive(false);
+      setIsParentDropTarget(false);
       return;
     }
 
     event.preventDefault();
     setIsDragActive(false);
+    setIsParentDropTarget(false);
 
     const droppedFiles = Array.from(event.dataTransfer.files ?? []);
 
@@ -1744,7 +1807,14 @@ function FilesPage() {
           <div className="headerTitle">
             <div className="folderNavLine">
               {parentCrumb && (
-                <button className="backFolderButton" type="button" onClick={() => openFolder(parentCrumb.id)}>
+                <button
+                  className="backFolderButton"
+                  type="button"
+                  onClick={() => openFolder(parentCrumb.id)}
+                  onDragLeave={handleParentFolderDragLeave}
+                  onDragOver={handleParentFolderDragOver}
+                  onDrop={(event) => void handleParentFolderDrop(event)}
+                >
                   <span aria-hidden="true">←</span>
                   Назад
                 </button>
@@ -1764,6 +1834,15 @@ function FilesPage() {
                 ))}
               </div>
             </div>
+            {parentCrumb && mobileFileDrag && (
+              <div
+                className={`mobileParentDropZone ${isParentDropTarget ? "active" : ""}`}
+                data-parent-folder-drop="true"
+              >
+                <span aria-hidden="true">↑</span>
+                <strong>Отпустите здесь, чтобы перенести на уровень выше</strong>
+              </div>
+            )}
             <h1>{pageTitle}</h1>
             <p>{totalItems} объектов</p>
           </div>
