@@ -1,4 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent, type PointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type FormEvent,
+  type PointerEvent,
+} from "react";
 import {
   Link,
   Navigate,
@@ -798,6 +808,8 @@ function FilesPage() {
   } | null>(null);
   const mobileDragTimerRef = useRef<number | null>(null);
   const mobileDragClickBlockRef = useRef<string | number | null>(null);
+  const mobileDragLastYRef = useRef<number | null>(null);
+  const mobileDragAutoScrollRef = useRef<number | null>(null);
 
   const [user, setUser] = useState<CurrentUserResponse | null>(null);
   const [currentFolder, setCurrentFolder] = useState<FolderRecord | null>(null);
@@ -873,6 +885,11 @@ function FilesPage() {
   const sortLabel =
     sortMode === "name-asc" ? "По имени" : sortMode === "size-desc" ? "По размеру" : "Сначала новые";
   const shouldShowListPreview = viewMode === "list" && sortedFiles.length > 0;
+  const preventMobileDragTouchMove = useCallback((event: TouchEvent) => {
+    if (mobileDragRef.current?.isActive) {
+      event.preventDefault();
+    }
+  }, []);
 
   useEffect(() => {
     if (!hasSavedAccessToken()) {
@@ -1150,6 +1167,9 @@ function FilesPage() {
         window.clearTimeout(mobileDragTimerRef.current);
       }
 
+      stopMobileDragAutoScroll();
+      document.removeEventListener("touchmove", preventMobileDragTouchMove);
+
       if (filePreview?.objectUrl && filePreview.shouldRevokeObjectUrl) {
         URL.revokeObjectURL(filePreview.objectUrl);
       }
@@ -1284,6 +1304,44 @@ function FilesPage() {
     }
   }
 
+  function stopMobileDragAutoScroll() {
+    if (mobileDragAutoScrollRef.current !== null) {
+      window.cancelAnimationFrame(mobileDragAutoScrollRef.current);
+      mobileDragAutoScrollRef.current = null;
+    }
+
+    mobileDragLastYRef.current = null;
+  }
+
+  function startMobileDragAutoScroll() {
+    if (mobileDragAutoScrollRef.current !== null) {
+      return;
+    }
+
+    const scrollStep = () => {
+      const pointerY = mobileDragLastYRef.current;
+
+      if (pointerY !== null) {
+        const edgeSize = Math.min(120, window.innerHeight * 0.22);
+        let scrollDelta = 0;
+
+        if (pointerY < edgeSize) {
+          scrollDelta = -Math.round(((edgeSize - pointerY) / edgeSize) * 18);
+        } else if (pointerY > window.innerHeight - edgeSize) {
+          scrollDelta = Math.round(((pointerY - (window.innerHeight - edgeSize)) / edgeSize) * 18);
+        }
+
+        if (scrollDelta !== 0) {
+          window.scrollBy({ top: scrollDelta, behavior: "auto" });
+        }
+      }
+
+      mobileDragAutoScrollRef.current = window.requestAnimationFrame(scrollStep);
+    };
+
+    mobileDragAutoScrollRef.current = window.requestAnimationFrame(scrollStep);
+  }
+
   function findMobileDropTargetFolderID(x: number, y: number) {
     const element = document.elementFromPoint(x, y);
     const folderElement = element?.closest<HTMLElement>("[data-folder-drop-id]");
@@ -1293,6 +1351,8 @@ function FilesPage() {
 
   function resetMobileFileDrag() {
     clearMobileDragTimer();
+    stopMobileDragAutoScroll();
+    document.removeEventListener("touchmove", preventMobileDragTouchMove);
     mobileDragRef.current = null;
     setMobileFileDrag(null);
     setDropTargetFolderID(null);
@@ -1327,6 +1387,9 @@ function FilesPage() {
       }
 
       mobileDragRef.current.isActive = true;
+      mobileDragLastYRef.current = event.clientY;
+      document.addEventListener("touchmove", preventMobileDragTouchMove, { passive: false });
+      startMobileDragAutoScroll();
       setSelectedPreviewFile(file);
       setMobileFileDrag({ file, x: event.clientX, y: event.clientY });
     }, 320);
@@ -1350,6 +1413,7 @@ function FilesPage() {
     }
 
     event.preventDefault();
+    mobileDragLastYRef.current = event.clientY;
     setMobileFileDrag({ file: drag.file, x: event.clientX, y: event.clientY });
     setDropTargetFolderID(findMobileDropTargetFolderID(event.clientX, event.clientY));
   }
