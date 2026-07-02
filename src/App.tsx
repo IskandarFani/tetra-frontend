@@ -820,6 +820,9 @@ function FilesPage() {
   const mobileDragClickBlockRef = useRef<string | number | null>(null);
   const mobileDragLastYRef = useRef<number | null>(null);
   const mobileDragAutoScrollRef = useRef<number | null>(null);
+  const mobileParentNavigateTimerRef = useRef<number | null>(null);
+  const mobileParentNavigateTargetRef = useRef<string | number | null | undefined>(undefined);
+  const parentCrumbRef = useRef<BreadcrumbItem | null>(null);
 
   const [user, setUser] = useState<CurrentUserResponse | null>(null);
   const [currentFolder, setCurrentFolder] = useState<FolderRecord | null>(null);
@@ -853,11 +856,13 @@ function FilesPage() {
   const [isParentDropTarget, setIsParentDropTarget] = useState(false);
   const [movingFileID, setMovingFileID] = useState<string | number | null>(null);
   const [mobileFileDrag, setMobileFileDrag] = useState<MobileFileDragState | null>(null);
+  const [moveFeedback, setMoveFeedback] = useState<"moving" | "done" | null>(null);
 
   const totalItems = folders.length + files.length;
   const profileInitial = user?.email?.trim().charAt(0).toUpperCase() ?? "T";
   const pageTitle = currentFolder?.name ?? "Мои файлы";
   const parentCrumb = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : null;
+  parentCrumbRef.current = parentCrumb;
 
   const selectedFilesLabel = useMemo(() => {
     if (selectedFiles.length === 0) {
@@ -1052,6 +1057,16 @@ function FilesPage() {
   }, [successMessage]);
 
   useEffect(() => {
+    if (moveFeedback !== "done") {
+      return;
+    }
+
+    const timeoutID = window.setTimeout(() => setMoveFeedback(null), 1200);
+
+    return () => window.clearTimeout(timeoutID);
+  }, [moveFeedback]);
+
+  useEffect(() => {
     setSelectedPreviewFile((currentFile) => {
       if (!currentFile) {
         return null;
@@ -1178,8 +1193,12 @@ function FilesPage() {
         window.clearTimeout(mobileDragTimerRef.current);
       }
 
+      clearMobileParentNavigateTimer();
       stopMobileDragAutoScroll();
       document.removeEventListener("touchmove", preventMobileDragTouchMove);
+      document.removeEventListener("pointermove", handleDocumentMobilePointerMove);
+      document.removeEventListener("pointerup", handleDocumentMobilePointerUp);
+      document.removeEventListener("pointercancel", handleDocumentMobilePointerCancel);
 
       if (filePreview?.objectUrl && filePreview.shouldRevokeObjectUrl) {
         URL.revokeObjectURL(filePreview.objectUrl);
@@ -1325,6 +1344,31 @@ function FilesPage() {
     mobileDragLastYRef.current = null;
   }
 
+  function clearMobileParentNavigateTimer() {
+    if (mobileParentNavigateTimerRef.current !== null) {
+      window.clearTimeout(mobileParentNavigateTimerRef.current);
+      mobileParentNavigateTimerRef.current = null;
+    }
+
+    mobileParentNavigateTargetRef.current = undefined;
+  }
+
+  function scheduleMobileParentNavigation(targetFolderID: string | number | null) {
+    if (mobileParentNavigateTargetRef.current === targetFolderID && mobileParentNavigateTimerRef.current !== null) {
+      return;
+    }
+
+    clearMobileParentNavigateTimer();
+    mobileParentNavigateTargetRef.current = targetFolderID;
+    mobileParentNavigateTimerRef.current = window.setTimeout(() => {
+      mobileParentNavigateTimerRef.current = null;
+      mobileParentNavigateTargetRef.current = undefined;
+      setIsParentDropTarget(false);
+      setDropTargetFolderID(null);
+      openFolder(targetFolderID);
+    }, 560);
+  }
+
   function startMobileDragAutoScroll() {
     if (mobileDragAutoScrollRef.current !== null) {
       return;
@@ -1356,9 +1400,10 @@ function FilesPage() {
 
   function findMobileDropTarget(x: number, y: number): MobileDropTarget | null {
     const element = document.elementFromPoint(x, y);
+    const currentParentCrumb = parentCrumbRef.current;
 
     if (element?.closest("[data-parent-folder-drop]")) {
-      return parentCrumb ? { kind: "parent", id: parentCrumb.id } : null;
+      return currentParentCrumb ? { kind: "parent", id: currentParentCrumb.id } : null;
     }
 
     const folderElement = element?.closest<HTMLElement>("[data-folder-drop-id]");
@@ -1372,12 +1417,81 @@ function FilesPage() {
 
   function resetMobileFileDrag() {
     clearMobileDragTimer();
+    clearMobileParentNavigateTimer();
     stopMobileDragAutoScroll();
     document.removeEventListener("touchmove", preventMobileDragTouchMove);
+    document.removeEventListener("pointermove", handleDocumentMobilePointerMove);
+    document.removeEventListener("pointerup", handleDocumentMobilePointerUp);
+    document.removeEventListener("pointercancel", handleDocumentMobilePointerCancel);
     mobileDragRef.current = null;
     setMobileFileDrag(null);
     setDropTargetFolderID(null);
     setIsParentDropTarget(false);
+  }
+
+  function updateActiveMobileDrag(x: number, y: number) {
+    const drag = mobileDragRef.current;
+
+    if (!drag?.isActive) {
+      return;
+    }
+
+    mobileDragLastYRef.current = y;
+    const dropTarget = findMobileDropTarget(x, y);
+    setMobileFileDrag({ file: drag.file, x, y });
+    setDropTargetFolderID(dropTarget?.kind === "folder" ? dropTarget.id : null);
+    setIsParentDropTarget(dropTarget?.kind === "parent");
+
+    if (dropTarget?.kind === "parent") {
+      scheduleMobileParentNavigation(dropTarget.id);
+    } else {
+      clearMobileParentNavigateTimer();
+    }
+  }
+
+  function finishActiveMobileDrag(x: number, y: number) {
+    const drag = mobileDragRef.current;
+
+    if (!drag?.isActive) {
+      resetMobileFileDrag();
+      return;
+    }
+
+    const dropTarget = findMobileDropTarget(x, y);
+    mobileDragClickBlockRef.current = drag.file.id;
+    resetMobileFileDrag();
+
+    if (dropTarget?.kind === "folder") {
+      void moveFileToFolder(drag.file.id, dropTarget.id);
+    }
+  }
+
+  function handleDocumentMobilePointerMove(event: globalThis.PointerEvent) {
+    const drag = mobileDragRef.current;
+
+    if (!drag?.isActive || drag.pointerID !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    updateActiveMobileDrag(event.clientX, event.clientY);
+  }
+
+  function handleDocumentMobilePointerUp(event: globalThis.PointerEvent) {
+    const drag = mobileDragRef.current;
+
+    if (!drag || drag.pointerID !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    finishActiveMobileDrag(event.clientX, event.clientY);
+  }
+
+  function handleDocumentMobilePointerCancel(event: globalThis.PointerEvent) {
+    if (mobileDragRef.current?.pointerID === event.pointerId) {
+      resetMobileFileDrag();
+    }
   }
 
   function handleMobileFilePointerDown(event: PointerEvent<HTMLElement>, file: FileRecord) {
@@ -1411,6 +1525,9 @@ function FilesPage() {
       mobileDragRef.current.isActive = true;
       mobileDragLastYRef.current = event.clientY;
       document.addEventListener("touchmove", preventMobileDragTouchMove, { passive: false });
+      document.addEventListener("pointermove", handleDocumentMobilePointerMove);
+      document.addEventListener("pointerup", handleDocumentMobilePointerUp);
+      document.addEventListener("pointercancel", handleDocumentMobilePointerCancel);
       startMobileDragAutoScroll();
       setSelectedPreviewFile(file);
       setMobileFileDrag({ file, x: event.clientX, y: event.clientY });
@@ -1435,11 +1552,7 @@ function FilesPage() {
     }
 
     event.preventDefault();
-    mobileDragLastYRef.current = event.clientY;
-    const dropTarget = findMobileDropTarget(event.clientX, event.clientY);
-    setMobileFileDrag({ file: drag.file, x: event.clientX, y: event.clientY });
-    setDropTargetFolderID(dropTarget?.kind === "folder" ? dropTarget.id : null);
-    setIsParentDropTarget(dropTarget?.kind === "parent");
+    updateActiveMobileDrag(event.clientX, event.clientY);
   }
 
   function handleMobileFilePointerUp(event: PointerEvent<HTMLElement>) {
@@ -1449,22 +1562,15 @@ function FilesPage() {
       return;
     }
 
-    const dropTarget = drag.isActive ? findMobileDropTarget(event.clientX, event.clientY) : null;
-
     if (drag.isActive) {
       event.preventDefault();
-      mobileDragClickBlockRef.current = drag.file.id;
     }
 
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
 
-    resetMobileFileDrag();
-
-    if (dropTarget) {
-      void moveFileToFolder(drag.file.id, dropTarget.id);
-    }
+    finishActiveMobileDrag(event.clientX, event.clientY);
   }
 
   function handleMobileFilePointerCancel(event: PointerEvent<HTMLElement>) {
@@ -1582,6 +1688,7 @@ function FilesPage() {
 
   async function moveFileToFolder(fileID: string | number, targetFolderID: string | number | null) {
     setMovingFileID(fileID);
+    setMoveFeedback("moving");
     setMoveTargetFile(null);
     setErrorMessage("");
     setSuccessMessage("");
@@ -1590,14 +1697,16 @@ function FilesPage() {
       const { response, data } = await moveFile(fileID, targetFolderID);
 
       if (!response.ok) {
+        setMoveFeedback(null);
         setErrorMessage(getErrorMessage(data, "Не удалось переместить файл"));
         return;
       }
 
       setSelectedPreviewFile((currentFile) => (currentFile && String(currentFile.id) === String(fileID) ? null : currentFile));
       await reloadCurrentFolder();
-      setSuccessMessage("Файл перемещён");
+      setMoveFeedback("done");
     } catch (error) {
+      setMoveFeedback(null);
       setErrorMessage(error instanceof Error ? error.message : "Не удалось переместить файл");
     } finally {
       setMovingFileID(null);
@@ -1840,7 +1949,7 @@ function FilesPage() {
                 data-parent-folder-drop="true"
               >
                 <span aria-hidden="true">↑</span>
-                <strong>Отпустите здесь, чтобы перенести на уровень выше</strong>
+                <strong>Подержите здесь, чтобы подняться на уровень выше</strong>
               </div>
             )}
             <h1>{pageTitle}</h1>
@@ -1951,6 +2060,11 @@ function FilesPage() {
 
         {errorMessage && <p className="errorMessage">Ошибка: {errorMessage}</p>}
         {successMessage && <div className="toastMessage">{successMessage}</div>}
+        {moveFeedback && (
+          <div className={`moveFeedback ${moveFeedback}`}>
+            <span aria-hidden="true">{moveFeedback === "moving" ? "" : "✓"}</span>
+          </div>
+        )}
 
         <section
           className={`fileSurface ${viewMode === "list" ? "listSurface" : ""} ${isDragActive ? "dragActive" : ""}`}

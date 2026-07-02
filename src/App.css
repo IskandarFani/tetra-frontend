@@ -1100,6 +1100,47 @@ button:disabled {
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.32);
 }
 
+.moveFeedback {
+  position: fixed;
+  right: 26px;
+  bottom: 26px;
+  z-index: 62;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.36);
+}
+
+.moveFeedback.moving span {
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(251, 191, 36, 0.22);
+  border-top-color: #fbbf24;
+  border-radius: 999px;
+  animation: spin 0.78s linear infinite;
+}
+
+.moveFeedback.done {
+  border: 1px solid rgba(74, 222, 128, 0.36);
+  background: rgba(6, 78, 59, 0.94);
+}
+
+.moveFeedback.done span {
+  color: #bbf7d0;
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .fileSurface {
   position: relative;
   min-height: 0;
