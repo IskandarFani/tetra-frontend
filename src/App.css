@@ -1174,8 +1174,51 @@ button:disabled {
   opacity: 0.46;
 }
 
+.fileItem {
+  touch-action: pan-y;
+  user-select: none;
+}
+
 .folderItem.dropTarget {
   transform: translateY(-2px);
+}
+
+.folderItem.dropTarget .folderIcon {
+  transform: scale(1.08);
+}
+
+.mobileDragGhost {
+  position: fixed;
+  z-index: 90;
+  left: 0;
+  top: 0;
+  width: min(240px, calc(100vw - 40px));
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid rgba(251, 191, 36, 0.72);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.96);
+  color: #f8fafc;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  transform: translate(-50%, -110%);
+}
+
+.mobileDragGhost svg {
+  width: 34px;
+  height: 34px;
+}
+
+.mobileDragGhost span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 820;
 }
 
 .itemOpenButton {

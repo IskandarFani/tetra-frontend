@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent, type PointerEvent } from "react";
 import {
   Link,
   Navigate,
@@ -74,6 +74,12 @@ type FolderActionResponse = ApiMessageResponse & {
 
 type FileActionResponse = ApiMessageResponse & {
   file?: FileRecord;
+};
+
+type MobileFileDragState = {
+  file: FileRecord;
+  x: number;
+  y: number;
 };
 
 type ConfirmDialogState =
@@ -783,6 +789,15 @@ function FilesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const folderID = searchParams.get("folder_id");
   const currentFolderID = folderID || null;
+  const mobileDragRef = useRef<{
+    file: FileRecord;
+    isActive: boolean;
+    pointerID: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const mobileDragTimerRef = useRef<number | null>(null);
+  const mobileDragClickBlockRef = useRef<string | number | null>(null);
 
   const [user, setUser] = useState<CurrentUserResponse | null>(null);
   const [currentFolder, setCurrentFolder] = useState<FolderRecord | null>(null);
@@ -814,6 +829,7 @@ function FilesPage() {
   const [inlinePreview, setInlinePreview] = useState<InlinePreviewState>({ kind: "empty" });
   const [dropTargetFolderID, setDropTargetFolderID] = useState<string | number | null>(null);
   const [movingFileID, setMovingFileID] = useState<string | number | null>(null);
+  const [mobileFileDrag, setMobileFileDrag] = useState<MobileFileDragState | null>(null);
 
   const totalItems = folders.length + files.length;
   const profileInitial = user?.email?.trim().charAt(0).toUpperCase() ?? "T";
@@ -1130,6 +1146,10 @@ function FilesPage() {
 
   useEffect(() => {
     return () => {
+      if (mobileDragTimerRef.current !== null) {
+        window.clearTimeout(mobileDragTimerRef.current);
+      }
+
       if (filePreview?.objectUrl && filePreview.shouldRevokeObjectUrl) {
         URL.revokeObjectURL(filePreview.objectUrl);
       }
@@ -1255,6 +1275,114 @@ function FilesPage() {
 
   function handleFileDragEnd() {
     setDropTargetFolderID(null);
+  }
+
+  function clearMobileDragTimer() {
+    if (mobileDragTimerRef.current !== null) {
+      window.clearTimeout(mobileDragTimerRef.current);
+      mobileDragTimerRef.current = null;
+    }
+  }
+
+  function findMobileDropTargetFolderID(x: number, y: number) {
+    const element = document.elementFromPoint(x, y);
+    const folderElement = element?.closest<HTMLElement>("[data-folder-drop-id]");
+
+    return folderElement?.dataset.folderDropId ?? null;
+  }
+
+  function resetMobileFileDrag() {
+    clearMobileDragTimer();
+    mobileDragRef.current = null;
+    setMobileFileDrag(null);
+    setDropTargetFolderID(null);
+  }
+
+  function handleMobileFilePointerDown(event: PointerEvent<HTMLElement>, file: FileRecord) {
+    if (event.pointerType === "mouse") {
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+
+    if (target.closest(".itemActions")) {
+      return;
+    }
+
+    clearMobileDragTimer();
+    setActionMenu(null);
+    mobileDragRef.current = {
+      file,
+      isActive: false,
+      pointerID: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    mobileDragTimerRef.current = window.setTimeout(() => {
+      if (!mobileDragRef.current || mobileDragRef.current.pointerID !== event.pointerId) {
+        return;
+      }
+
+      mobileDragRef.current.isActive = true;
+      setSelectedPreviewFile(file);
+      setMobileFileDrag({ file, x: event.clientX, y: event.clientY });
+    }, 320);
+  }
+
+  function handleMobileFilePointerMove(event: PointerEvent<HTMLElement>) {
+    const drag = mobileDragRef.current;
+
+    if (!drag || drag.pointerID !== event.pointerId) {
+      return;
+    }
+
+    const movedDistance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+
+    if (!drag.isActive) {
+      if (movedDistance > 10) {
+        resetMobileFileDrag();
+      }
+
+      return;
+    }
+
+    event.preventDefault();
+    setMobileFileDrag({ file: drag.file, x: event.clientX, y: event.clientY });
+    setDropTargetFolderID(findMobileDropTargetFolderID(event.clientX, event.clientY));
+  }
+
+  function handleMobileFilePointerUp(event: PointerEvent<HTMLElement>) {
+    const drag = mobileDragRef.current;
+
+    if (!drag || drag.pointerID !== event.pointerId) {
+      return;
+    }
+
+    const targetFolderID = drag.isActive ? findMobileDropTargetFolderID(event.clientX, event.clientY) : null;
+
+    if (drag.isActive) {
+      event.preventDefault();
+      mobileDragClickBlockRef.current = drag.file.id;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    resetMobileFileDrag();
+
+    if (targetFolderID !== null) {
+      void moveFileToFolder(drag.file.id, targetFolderID);
+    }
+  }
+
+  function handleMobileFilePointerCancel(event: PointerEvent<HTMLElement>) {
+    if (mobileDragRef.current?.pointerID === event.pointerId) {
+      resetMobileFileDrag();
+    }
   }
 
   function handleFolderDragOver(event: DragEvent<HTMLElement>, folder: FolderRecord) {
@@ -1732,6 +1860,7 @@ function FilesPage() {
                     {sortedFolders.map((folder) => (
                       <article
                         className={`fsItem folderItem ${String(dropTargetFolderID) === String(folder.id) ? "dropTarget" : ""}`}
+                        data-folder-drop-id={folder.id}
                         key={`folder-${folder.id}`}
                         onDragLeave={(event) => handleFolderDragLeave(event, folder)}
                         onDragOver={(event) => handleFolderDragOver(event, folder)}
@@ -1806,11 +1935,20 @@ function FilesPage() {
                           key={`file-${file.id}`}
                           onDragEnd={handleFileDragEnd}
                           onDragStart={(event) => handleFileDragStart(event, file)}
+                          onPointerCancel={handleMobileFilePointerCancel}
+                          onPointerDown={(event) => handleMobileFilePointerDown(event, file)}
+                          onPointerMove={handleMobileFilePointerMove}
+                          onPointerUp={handleMobileFilePointerUp}
                         >
                           <button
                             className="itemOpenButton"
                             type="button"
                             onClick={() => {
+                              if (String(mobileDragClickBlockRef.current) === String(file.id)) {
+                                mobileDragClickBlockRef.current = null;
+                                return;
+                              }
+
                               if (viewMode === "list") {
                                 setSelectedPreviewFile(file);
                                 return;
@@ -1970,6 +2108,13 @@ function FilesPage() {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {mobileFileDrag && (
+        <div className="mobileDragGhost" style={{ left: mobileFileDrag.x, top: mobileFileDrag.y }}>
+          <IconFile kind={getFileKind(mobileFileDrag.file)} />
+          <span>{getFileName(mobileFileDrag.file)}</span>
         </div>
       )}
 
