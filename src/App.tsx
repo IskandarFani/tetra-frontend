@@ -807,6 +807,7 @@ function FilesPage() {
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [actionMenu, setActionMenu] = useState<ActionMenuState | null>(null);
+  const [moveTargetFile, setMoveTargetFile] = useState<FileRecord | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
   const [previewLoadingFileID, setPreviewLoadingFileID] = useState<string | number | null>(null);
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<FileRecord | null>(null);
@@ -1326,6 +1327,7 @@ function FilesPage() {
 
   async function moveFileToFolder(fileID: string | number, targetFolderID: string | number | null) {
     setMovingFileID(fileID);
+    setMoveTargetFile(null);
     setErrorMessage("");
     setSuccessMessage("");
 
@@ -1534,10 +1536,6 @@ function FilesPage() {
             <span className="navIcon">▦</span>
             Файлы
           </button>
-          <Link className="appNavLink" to="/">
-            <span className="navIcon">⌂</span>
-            Главная
-          </Link>
           <button className="appNavLink disabled" type="button" disabled>
             <span className="navIcon">⌕</span>
             Поиск
@@ -1957,6 +1955,15 @@ function FilesPage() {
                 >
                   Скачать
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoveTargetFile(actionMenu.item);
+                    setActionMenu(null);
+                  }}
+                >
+                  Переместить
+                </button>
                 <button className="dangerMenuButton" type="button" onClick={() => requestDeleteFile(actionMenu.item)}>
                   Удалить
                 </button>
@@ -2007,6 +2014,57 @@ function FilesPage() {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {moveTargetFile && (
+        <Modal title={`Переместить «${getFileName(moveTargetFile)}»`} onClose={() => setMoveTargetFile(null)}>
+          <div className="moveDialog">
+            <p>Выберите папку текущего уровня или отправьте файл обратно в корень.</p>
+            <div className="moveFolderList">
+              {currentFolderID !== null && (
+                <button
+                  type="button"
+                  disabled={String(movingFileID) === String(moveTargetFile.id)}
+                  onClick={() => void moveFileToFolder(moveTargetFile.id, null)}
+                >
+                  <span className="moveFolderIcon">
+                    <IconFolder />
+                  </span>
+                  <span>
+                    <strong>Мои файлы</strong>
+                    <small>Переместить в корень</small>
+                  </span>
+                </button>
+              )}
+
+              {sortedFolders.map((folder) => (
+                <button
+                  key={`move-folder-${folder.id}`}
+                  type="button"
+                  disabled={String(movingFileID) === String(moveTargetFile.id)}
+                  onClick={() => void moveFileToFolder(moveTargetFile.id, folder.id)}
+                >
+                  <span className={`moveFolderIcon ${folderHasContent(folder) ? "hasContent" : ""}`}>
+                    <IconFolder />
+                  </span>
+                  <span>
+                    <strong>{folder.name}</strong>
+                    <small>{folderHasContent(folder) ? "Есть содержимое" : "Пустая папка"}</small>
+                  </span>
+                </button>
+              ))}
+
+              {currentFolderID === null && sortedFolders.length === 0 && (
+                <p className="moveDialogEmpty">В текущей папке нет вложенных папок.</p>
+              )}
+            </div>
+            <div className="modalActions">
+              <button className="ghostButton" type="button" onClick={() => setMoveTargetFile(null)}>
+                Отмена
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
 
@@ -2199,6 +2257,10 @@ function ProfilePage() {
 }
 
 function RootPage() {
+  if (hasSavedAccessToken()) {
+    return <Navigate to="/files" replace />;
+  }
+
   return <WelcomePage />;
 }
 
