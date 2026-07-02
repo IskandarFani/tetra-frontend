@@ -100,6 +100,10 @@ type MobileDropTarget =
   | {
       kind: "parent";
       id: string | number | null;
+    }
+  | {
+      kind: "current";
+      id: string | number | null;
     };
 
 type ConfirmDialogState =
@@ -823,6 +827,7 @@ function FilesPage() {
   const mobileParentNavigateTimerRef = useRef<number | null>(null);
   const mobileParentNavigateTargetRef = useRef<string | number | null | undefined>(undefined);
   const parentCrumbRef = useRef<BreadcrumbItem | null>(null);
+  const currentFolderIDRef = useRef<string | number | null>(null);
 
   const [user, setUser] = useState<CurrentUserResponse | null>(null);
   const [currentFolder, setCurrentFolder] = useState<FolderRecord | null>(null);
@@ -863,6 +868,7 @@ function FilesPage() {
   const pageTitle = currentFolder?.name ?? "Мои файлы";
   const parentCrumb = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : null;
   parentCrumbRef.current = parentCrumb;
+  currentFolderIDRef.current = currentFolderID;
 
   const selectedFilesLabel = useMemo(() => {
     if (selectedFiles.length === 0) {
@@ -1401,6 +1407,7 @@ function FilesPage() {
   function findMobileDropTarget(x: number, y: number): MobileDropTarget | null {
     const element = document.elementFromPoint(x, y);
     const currentParentCrumb = parentCrumbRef.current;
+    const currentTargetFolderID = currentFolderIDRef.current;
 
     if (element?.closest("[data-parent-folder-drop]")) {
       return currentParentCrumb ? { kind: "parent", id: currentParentCrumb.id } : null;
@@ -1410,6 +1417,10 @@ function FilesPage() {
 
     if (folderElement?.dataset.folderDropId) {
       return { kind: "folder", id: folderElement.dataset.folderDropId };
+    }
+
+    if (element?.closest("[data-current-folder-drop]")) {
+      return { kind: "current", id: currentTargetFolderID };
     }
 
     return null;
@@ -1427,6 +1438,7 @@ function FilesPage() {
     setMobileFileDrag(null);
     setDropTargetFolderID(null);
     setIsParentDropTarget(false);
+    setIsDragActive(false);
   }
 
   function updateActiveMobileDrag(x: number, y: number) {
@@ -1441,6 +1453,7 @@ function FilesPage() {
     setMobileFileDrag({ file: drag.file, x, y });
     setDropTargetFolderID(dropTarget?.kind === "folder" ? dropTarget.id : null);
     setIsParentDropTarget(dropTarget?.kind === "parent");
+    setIsDragActive(dropTarget?.kind === "current");
 
     if (dropTarget?.kind === "parent") {
       scheduleMobileParentNavigation(dropTarget.id);
@@ -1461,7 +1474,7 @@ function FilesPage() {
     mobileDragClickBlockRef.current = drag.file.id;
     resetMobileFileDrag();
 
-    if (dropTarget?.kind === "folder") {
+    if (dropTarget?.kind === "folder" || dropTarget?.kind === "current") {
       void moveFileToFolder(drag.file.id, dropTarget.id);
     }
   }
@@ -1703,7 +1716,13 @@ function FilesPage() {
       }
 
       setSelectedPreviewFile((currentFile) => (currentFile && String(currentFile.id) === String(fileID) ? null : currentFile));
-      await reloadCurrentFolder();
+
+      if (String(currentFolderIDRef.current ?? "") === String(targetFolderID ?? "")) {
+        await reloadCurrentFolder();
+      } else {
+        openFolder(targetFolderID);
+      }
+
       setMoveFeedback("done");
     } catch (error) {
       setMoveFeedback(null);
@@ -2069,11 +2088,16 @@ function FilesPage() {
         <section
           className={`fileSurface ${viewMode === "list" ? "listSurface" : ""} ${isDragActive ? "dragActive" : ""}`}
           aria-busy={isLoading}
+          data-current-folder-drop="true"
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
-          {isDragActive && <div className="dropHint">Отпустите файлы, загрузка начнётся сразу</div>}
+          {isDragActive && (
+            <div className="dropHint">
+              {mobileFileDrag ? "Отпустите файл здесь, чтобы оставить в этой папке" : "Отпустите файлы, загрузка начнётся сразу"}
+            </div>
+          )}
 
           {isLoading ? (
             <div className="loadingState">Загружаем файловое пространство...</div>
