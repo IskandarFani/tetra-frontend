@@ -51,6 +51,8 @@ type FolderRecord = {
   parentId?: string | number | null;
   created_at?: string;
   createdAt?: string;
+  has_content?: boolean;
+  hasContent?: boolean;
 };
 
 type BreadcrumbItem = {
@@ -381,6 +383,21 @@ async function fetchFileBlob(file: FileRecord) {
   return response.blob();
 }
 
+async function decodeTextBlob(blob: Blob) {
+  const buffer = await blob.arrayBuffer();
+  const utf8Text = new TextDecoder("utf-8").decode(buffer);
+
+  if (!utf8Text.includes("\uFFFD")) {
+    return utf8Text;
+  }
+
+  try {
+    return new TextDecoder("windows-1251").decode(buffer);
+  } catch {
+    return utf8Text;
+  }
+}
+
 function normalizeFolderContent(data: FolderContentResponse) {
   const breadcrumbs = data.breadcrumbs?.length ? data.breadcrumbs : [ROOT_CRUMB];
   const normalizedBreadcrumbs = breadcrumbs.map((crumb, index) =>
@@ -458,6 +475,10 @@ function getFileCreatedAt(file: FileRecord) {
 
 function getFolderCreatedAt(folder: FolderRecord) {
   return folder.created_at ?? folder.createdAt;
+}
+
+function folderHasContent(folder: FolderRecord) {
+  return Boolean(folder.has_content ?? folder.hasContent);
 }
 
 function getFileKind(file: FileRecord) {
@@ -1044,7 +1065,7 @@ function FilesPage() {
           }
 
           const blob = await fetchFileBlob(previewFile);
-          const text = await blob.text();
+          const text = await decodeTextBlob(blob);
 
           if (!ignore) {
             setInlinePreview({ kind: "text", text });
@@ -1410,7 +1431,7 @@ function FilesPage() {
       setPreviewLoadingFileID(file.id);
       try {
         const blob = await fetchFileBlob(file);
-        setFilePreview({ file, kind: "text", text: await blob.text() });
+        setFilePreview({ file, kind: "text", text: await decodeTextBlob(blob) });
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Не удалось открыть текстовый файл");
       } finally {
@@ -1513,6 +1534,10 @@ function FilesPage() {
             <span className="navIcon">▦</span>
             Файлы
           </button>
+          <Link className="appNavLink" to="/">
+            <span className="navIcon">⌂</span>
+            Главная
+          </Link>
           <button className="appNavLink disabled" type="button" disabled>
             <span className="navIcon">⌕</span>
             Поиск
@@ -1715,12 +1740,19 @@ function FilesPage() {
                         onDrop={(event) => void handleFolderDrop(event, folder)}
                       >
                         <button className="itemOpenButton" type="button" onClick={() => openFolder(folder.id)}>
-                          <span className="itemIcon folderIcon">
+                          <span className={`itemIcon folderIcon ${folderHasContent(folder) ? "hasContent" : ""}`}>
                             <IconFolder />
+                            {folderHasContent(folder) && (
+                              <span className="folderContentBadge" aria-label="В папке есть содержимое">
+                                <span />
+                                <span />
+                                <span />
+                              </span>
+                            )}
                           </span>
                           <span className="itemName">{folder.name}</span>
                           <span className="itemMeta">
-                            <span className="itemSize">Папка</span>
+                            <span className="itemSize">{folderHasContent(folder) ? "Есть содержимое" : "Пустая папка"}</span>
                             <span className="itemDate">{formatDate(getFolderCreatedAt(folder))}</span>
                           </span>
                         </button>
@@ -2167,10 +2199,6 @@ function ProfilePage() {
 }
 
 function RootPage() {
-  if (hasSavedAccessToken()) {
-    return <Navigate to="/files" replace />;
-  }
-
   return <WelcomePage />;
 }
 
