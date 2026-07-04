@@ -979,13 +979,8 @@ function FilesPage() {
           return;
         }
 
-        const normalized = normalizeFolderContent(data);
-
         if (!ignore) {
-          setCurrentFolder(normalized.currentFolder);
-          setBreadcrumbs(normalized.breadcrumbs);
-          setFolders(normalized.folders);
-          setFiles(normalized.files);
+          applyFolderContent(data);
         }
       } catch (error) {
         if (error instanceof AuthError) {
@@ -1224,19 +1219,40 @@ function FilesPage() {
     setSearchParams({ folder_id: String(id) });
   }
 
-  async function reloadCurrentFolder() {
-    const { response, data } = await fetchFolderContent(currentFolderID);
-
-    if (!response.ok) {
-      setErrorMessage(getErrorMessage(data, "Не удалось обновить папку"));
-      return;
+  function normalizeFolderIDForCompare(id: string | number | null | undefined) {
+    if (id === null || id === undefined || String(id) === "") {
+      return null;
     }
 
+    return String(id);
+  }
+
+  function isSameFolderID(left: string | number | null | undefined, right: string | number | null | undefined) {
+    return normalizeFolderIDForCompare(left) === normalizeFolderIDForCompare(right);
+  }
+
+  function applyFolderContent(data: FolderContentResponse) {
     const normalized = normalizeFolderContent(data);
     setCurrentFolder(normalized.currentFolder);
     setBreadcrumbs(normalized.breadcrumbs);
     setFolders(normalized.folders);
     setFiles(normalized.files);
+  }
+
+  async function loadFolderIntoState(folderID: string | number | null, fallbackMessage: string) {
+    const { response, data } = await fetchFolderContent(folderID);
+
+    if (!response.ok) {
+      setErrorMessage(getErrorMessage(data, fallbackMessage));
+      return false;
+    }
+
+    applyFolderContent(data);
+    return true;
+  }
+
+  async function reloadCurrentFolder() {
+    await loadFolderIntoState(currentFolderID, "Не удалось обновить папку");
   }
 
   async function handleCreateFolder(event: FormEvent<HTMLFormElement>) {
@@ -1717,10 +1733,11 @@ function FilesPage() {
 
       setSelectedPreviewFile((currentFile) => (currentFile && String(currentFile.id) === String(fileID) ? null : currentFile));
 
-      if (String(currentFolderIDRef.current ?? "") === String(targetFolderID ?? "")) {
-        await reloadCurrentFolder();
+      if (isSameFolderID(currentFolderIDRef.current, targetFolderID)) {
+        await loadFolderIntoState(targetFolderID, "Не удалось обновить папку");
       } else {
         openFolder(targetFolderID);
+        await loadFolderIntoState(targetFolderID, "Не удалось открыть папку назначения");
       }
 
       setMoveFeedback("done");
